@@ -9,7 +9,9 @@
 // and a MOUSE & KEYBOARD switch (a button here, Page Up on, Page Down off).
 //
 // ON/OFF registers the OpenXR layer (window_view_layer.dll, next to this exe) for every OpenXR game of this Windows user
-// (HKCU, no admin). A game picks it up when it starts, so the switch has to be on before the game starts. Everything
+// (HKCU, no admin), plus a 32-bit copy beside it so 32-bit games start too; the registration is checked against the
+// files and mended each time the app opens (Layer.Mend, v1.1). A game picks the layer up when it starts, so the switch
+// has to be on before the game starts. Everything
 // else goes through the shared-memory blocks of ../shared.h (offsets below match it): this app writes the pictures
 // and where they hang; the layer inside the game shows them and reports back.
 using System;
@@ -146,5 +148,20 @@ static class Layer {
     }
     public static void TurnOff() {
         using (var k = Registry.CurrentUser.OpenSubKey(KEY, true)) if (k != null) { k.DeleteValue(Manifest, false); k.DeleteValue(Manifest32, false); }
+    }
+    // v1.1 (2026-10-16), as Hand Freeze v3.2: the registration is checked against the files each time the app opens, and mended. A PC where ON
+    // was pressed with an older install (no 32-bit copy) keeps only the 64-bit copy registered, and its 32-bit OpenXR
+    // games then fail to start; pressing OFF and ON again is the cure, and nothing says so. Mend() does that press when
+    // the registered set does not match the files present.
+    public static bool Mend() {
+        if (!IsOn()) return false;
+        bool fine;
+        using (var k = Registry.CurrentUser.OpenSubKey(KEY)) {
+            bool want32 = File.Exists(Dll32), has32 = k != null && k.GetValue(Manifest32) is int && File.Exists(Manifest32);
+            fine = want32 == has32 && File.Exists(Manifest);
+        }
+        if (fine) return false;
+        TurnOn();
+        return true;
     }
 }

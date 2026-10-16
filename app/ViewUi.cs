@@ -126,6 +126,7 @@ class ViewUi : Form {
         desk.Load();
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
         input.Start();
+        Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
         ShowLayer();
         ShowInput();
         RefreshOpen();
