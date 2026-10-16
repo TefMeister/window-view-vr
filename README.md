@@ -22,7 +22,9 @@ sliders of the hand poser can now be moved without lifting the headset.
 Download the zip from [Releases](https://github.com/TefMeister/window-view-vr/releases), unzip it, right-click
 `install.ps1` and choose **Run with PowerShell**. A **Window View** icon appears on the desktop; no administrator rights
 are needed. Or build it yourself: `build.bat` (Visual Studio 2022 Build Tools for the layer; the app uses the C#
-compiler that ships with Windows) then `install.ps1`.
+compiler that ships with Windows) then `install.ps1`. After an update, open the app once: it checks that the layer
+registration still matches the files beside it (the 32-bit copy too) and mends it (v1.1, 2026-10-16, as Hand Freeze
+v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from starting).
 
 ## Use
 
