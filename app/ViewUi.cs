@@ -70,7 +70,6 @@ class ViewUi : Form {
         hint.ForeColor = Color.Gainsboro;
         top.Controls.Add(hint, 0, 1);
         top.SetColumnSpan(hint, 2);
-        Controls.Add(top);
 
         var mid = new Panel();
         mid.Dock = DockStyle.Top;
@@ -99,14 +98,11 @@ class ViewUi : Form {
         mid.Controls.Add(openList);
         mid.Controls.Add(btns);
         mid.Controls.Add(openLabel);
-        Controls.Add(mid);
-        mid.BringToFront();
 
         status.Dock = DockStyle.Bottom;
         status.Height = 44;
         status.Padding = new Padding(8, 4, 8, 4);
         status.ForeColor = Color.Gainsboro;
-        Controls.Add(status);
 
         var rowsLabel = new Label();
         rowsLabel.Text = "In VR";
@@ -118,12 +114,14 @@ class ViewUi : Form {
         rows.WrapContents = false;
         rows.AutoScroll = true;
         rows.Padding = new Padding(8, 0, 8, 0);
+        // WinForms lays docked controls out from the END of this list to the front, so the order here is: top strip
+        // first, then the open-window list, then the "In VR" heading, the status line at the bottom, the rows filling the rest
+        Controls.Clear();
         Controls.Add(rows);
+        Controls.Add(status);
         Controls.Add(rowsLabel);
-        rows.BringToFront();
-        rowsLabel.BringToFront();
-        mid.BringToFront();
-        top.BringToFront();
+        Controls.Add(mid);
+        Controls.Add(top);
 
         desk.Load();
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
