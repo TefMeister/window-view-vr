@@ -27,7 +27,7 @@ cl /nologo /O2 /EHsc /std:c++17 /MT /W4 /I"%HERE%third_party" "%HERE%test\xr_tes
 if errorlevel 1 (echo TEST APP BUILD FAILED & exit /b 1)
 
 if exist "%HERE%app\WindowView.cs" (
-    "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /optimize+ /win32icon:"%HERE%app\window_view.ico" ^
+    "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /optimize+ /unsafe /win32icon:"%HERE%app\window_view.ico" ^
        /out:"%HERE%dist\WindowView.exe" "%HERE%app\*.cs"
     if errorlevel 1 (echo APP BUILD FAILED & exit /b 1)
     copy /y "%HERE%app\window_view.ico" "%HERE%dist\" >nul
