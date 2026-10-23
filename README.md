@@ -96,4 +96,4 @@ webhead2oo9 (MIT), the loader shipped with [pyopenxr](https://github.com/cmbruns
 [OpenKneeboard](https://github.com/OpenKneeboard/OpenKneeboard) and Desktop+ showed years ago that windows belong in
 the headset; this is a smaller tool for one job.
 
-If you should be credited here and are not, email <td3kxlvr@proton.me> and it will be fixed.
+If you should be credited here and are not, open an issue on this repository and it will be fixed.
