@@ -89,6 +89,7 @@ class InputRouter : IDisposable {
             SetCursorPos(centre.X, centre.Y);
             shift = ctrl = alt = false;
             buttonsHeld = 0;
+            lock (desk.Lock) { desk.CursorToTop(); }
         } else {
             lock (desk.Lock) { dragging = sizing = null; }
             target = IntPtr.Zero;
@@ -186,10 +187,11 @@ class InputRouter : IDisposable {
     void Move(int dx, int dy) {
         Hit hit;
         lock (desk.Lock) {
+            float ox = desk.CursorX, oy = desk.CursorY;
             desk.MoveCursor(dx, dy);
-            if (dragging != null) {
-                dragging.X += dx * Desk.CURSOR_SPEED;
-                dragging.Y -= dy * Desk.CURSOR_SPEED;
+            if (dragging != null) {   // v1.2: by what the cursor really moved, so the header stays under it at the edge of its reach
+                dragging.X += desk.CursorX - ox;
+                dragging.Y += desk.CursorY - oy;
                 return;
             }
             if (sizing != null) {   // the grip follows the cursor: the width in metres from the left edge decides the scale

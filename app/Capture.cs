@@ -75,13 +75,17 @@ class Capture : IDisposable {
     static readonly Font TitleFont = new Font("Segoe UI", 10f, FontStyle.Bold);
     static readonly Brush HeaderBrush = new SolidBrush(Color.FromArgb(40, 44, 52));
     static readonly Pen GripPen = new Pen(Color.FromArgb(160, 160, 160), 2f);
-    static readonly Point[] Arrow = { new Point(0, 0), new Point(0, 16), new Point(4, 12), new Point(7, 19), new Point(9, 18), new Point(6, 11), new Point(11, 11) };
+    // v1.2: twice the size it was, with a thick dark outline, and yellow while the cursor is between windows (drawn on the
+    // nearest edge then): a 19-pixel arrow was about a centimetre across at arm's length and easy to lose
+    static readonly Point[] Arrow = { new Point(0, 0), new Point(0, 32), new Point(8, 24), new Point(14, 38), new Point(18, 36), new Point(12, 22), new Point(22, 22) };
+    static readonly Pen ArrowPen = new Pen(Color.Black, 3f);
+    static readonly Brush OutsideBrush = new SolidBrush(Color.FromArgb(255, 210, 40));
     readonly Dib full = new Dib(), pic = new Dib();
     public byte[] Pixels = new byte[0];
     public int Width, Height, ClientW, ClientH;
 
     // false = nothing new (the window is minimised, gone, or could not be drawn); the last picture should stay up
-    public bool Grab(IntPtr hwnd, string title, float opacity, Point? cursor) {
+    public bool Grab(IntPtr hwnd, string title, float opacity, Point? cursor, bool outside) {
         RECT wr, cr;
         if (!Native.IsWindow(hwnd) || Native.IsIconic(hwnd) || !Native.GetWindowRect(hwnd, out wr) || !Native.GetClientRect(hwnd, out cr)) return false;
         int fw = wr.Right - wr.Left, fh = wr.Bottom - wr.Top, cw = cr.Right, ch = cr.Bottom;
@@ -103,8 +107,8 @@ class Capture : IDisposable {
             if (cursor.HasValue) {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TranslateTransform(cursor.Value.X, cursor.Value.Y);
-                g.FillPolygon(Brushes.White, Arrow);
-                g.DrawPolygon(Pens.Black, Arrow);
+                g.DrawPolygon(ArrowPen, Arrow);
+                g.FillPolygon(outside ? OutsideBrush : Brushes.White, Arrow);
             }
             g.Flush();
         }

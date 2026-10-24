@@ -25,7 +25,7 @@ class ViewUi : Form {
     readonly System.Windows.Forms.Timer uiTimer = new System.Windows.Forms.Timer();
     Thread captureThread;
     volatile bool running = true;
-    int lastRelink;
+    int lastRelink, lastListed;
 
     delegate bool EnumProc(IntPtr hwnd, IntPtr l);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr l);
@@ -196,11 +196,24 @@ class ViewUi : Form {
         CloseHandle(h);
         return System.IO.Path.GetFileName(path);
     }
+    // v1.2: also every two seconds by itself, so a window opened after Window View shows up without REFRESH (Tefa
+    // 2026-10-24: "hand poser is not on the list"; it was opened 47 s after Window View, and the list was only read at
+    // start); the list is only rebuilt when it changed, and the picked line stays picked
     void RefreshOpen() {
         var list = ListOpen();
+        bool same = list.Count == openList.Items.Count;
+        for (int i = 0; same && i < list.Count; ++i) {
+            var o = (OpenWindow)openList.Items[i];
+            same = o.Hwnd == list[i].Hwnd && o.Title == list[i].Title;
+        }
+        if (same) return;
+        var picked = openList.SelectedItem as OpenWindow;
         openList.BeginUpdate();
         openList.Items.Clear();
-        foreach (var w in list) openList.Items.Add(w);
+        foreach (var w in list) {
+            openList.Items.Add(w);
+            if (picked != null && w.Hwnd == picked.Hwnd) openList.SelectedItem = w;
+        }
         openList.EndUpdate();
     }
     void AddSelected() {
@@ -292,6 +305,7 @@ class ViewUi : Form {
     // ---- every half second ---------------------------------------------------------------------------------------
     void Tick() {
         if (Environment.TickCount - lastRelink > 2000) { lastRelink = Environment.TickCount; Relink(); }
+        if (Environment.TickCount - lastListed > 2000) { lastListed = Environment.TickCount; RefreshOpen(); }
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         string err = shared.LastError != 0 ? "   last error " + shared.LastError : "";
         string where = "";
@@ -314,9 +328,13 @@ class ViewUi : Form {
             shared.Heartbeat();
             List<Placement> list;
             Hit under = new Hit();
+            bool outside = false;
             lock (desk.Lock) {
                 list = new List<Placement>(desk.Windows);
-                if (input.On) under = desk.HitTest(desk.CursorX, desk.CursorY);
+                if (input.On) {
+                    under = desk.HitTest(desk.CursorX, desk.CursorY);
+                    if (under.P == null) { under = desk.NearestEdge(desk.CursorX, desk.CursorY); outside = true; }   // v1.2
+                }
             }
             foreach (var p in list) {
                 if (p.Slot < 0) continue;
@@ -326,7 +344,7 @@ class ViewUi : Form {
                 Point? cursor = under.P == p ? new Point(under.PicX, under.PicY) : (Point?)null;
                 float x, y, scale, opacity;
                 lock (desk.Lock) { x = p.X; y = p.Y; scale = p.Scale; opacity = p.Opacity; }
-                if (cap.Grab(p.Hwnd, p.Title, opacity, cursor)) {
+                if (cap.Grab(p.Hwnd, p.Title, opacity, cursor, outside)) {
                     lock (desk.Lock) { p.PicW = cap.Width; p.PicH = cap.Height; }
                     shared.Publish(p.Slot, cap.Pixels, cap.Width, cap.Height, x, y, scale);
                 }

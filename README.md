@@ -74,7 +74,15 @@ On the dev PC with the OpenXR Simulator, 2026-10-16, `[verified-numerically 2026
   desk, the window dragged right by its header, the mouse moving again after Page Down. All six PASS.
 - A game started with no app running keeps running and shows nothing.
 
-**Not yet tried in a real headset, a real game, or with Hand Freeze.**
+First use in a real headset, home PC, 2026-10-24 (Tefa): two problems, both fixed in v1.2 the same evening, not yet
+tried again:
+
+- *"hand poser is not on the list"*: the list of open windows was read only when Window View started, and Hand Poser
+  was opened later. It now refreshes by itself every two seconds.
+- *"i need to somehow be able to know where my mouse is in vr"*: the cursor was drawn only while it was over a window,
+  and could wander almost a metre off into empty space. Now it starts in the middle of the top window, stays within
+  3 cm of the windows, is twice the size with a thick outline, and turns yellow on the nearest window's edge while it is
+  between windows.
 
 ## Limits
 

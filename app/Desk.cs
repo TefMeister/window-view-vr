@@ -33,6 +33,7 @@ class Desk {
     public const float DEFAULT_SCALE = 0.0006f, MIN_SCALE = 0.0002f, MAX_SCALE = 0.003f;   // metres per pixel
     public const float CURSOR_SPEED = 0.0006f;   // metres of desk per mouse pixel (1 mouse px = 1 window px at the default size)
     public const float REACH_X = 0.9f, REACH_Y = 0.6f;   // how far the cursor may go, metres
+    public const float CURSOR_MARGIN = 0.03f;   // v1.2: how far past the windows' outline the cursor may go, metres
     public readonly object Lock = new object();
     public readonly List<Placement> Windows = new List<Placement>();   // last = on top
     public float CursorX, CursorY;
@@ -53,9 +54,48 @@ class Desk {
         }
         return hit;
     }
+    // v1.2: the cursor stays within CURSOR_MARGIN of the windows' joint outline (Tefa 2026-10-24: "i need to somehow be
+    // able to know where my mouse is in vr"); before, it could wander up to REACH metres off into empty space, unseen
     public void MoveCursor(int dx, int dy) {
-        CursorX = Math.Max(-REACH_X, Math.Min(REACH_X, CursorX + dx * CURSOR_SPEED));
-        CursorY = Math.Max(-REACH_Y, Math.Min(REACH_Y, CursorY - dy * CURSOR_SPEED));
+        float minX = -REACH_X, maxX = REACH_X, minY = -REACH_Y, maxY = REACH_Y;
+        bool any = false;
+        foreach (var p in Windows) {
+            if (!p.Shown || !p.Live || p.PicW == 0) continue;
+            float l = p.Left - CURSOR_MARGIN, r = p.Left + p.PicW * p.Scale + CURSOR_MARGIN;
+            float t = p.Top + CURSOR_MARGIN, b = p.Top - p.PicH * p.Scale - CURSOR_MARGIN;
+            if (!any) { minX = l; maxX = r; minY = b; maxY = t; any = true; }
+            else { minX = Math.Min(minX, l); maxX = Math.Max(maxX, r); minY = Math.Min(minY, b); maxY = Math.Max(maxY, t); }
+        }
+        CursorX = Math.Max(minX, Math.Min(maxX, CursorX + dx * CURSOR_SPEED));
+        CursorY = Math.Max(minY, Math.Min(maxY, CursorY - dy * CURSOR_SPEED));
+    }
+    // v1.2: the cursor to the middle of the top window (MOUSE & KEYBOARD switched on), so it always starts in sight
+    public void CursorToTop() {
+        for (int i = Windows.Count - 1; i >= 0; --i) {
+            var p = Windows[i];
+            if (!p.Shown || !p.Live || p.PicW == 0) continue;
+            CursorX = p.X;
+            CursorY = p.Y;
+            return;
+        }
+    }
+    // v1.2: the window nearest the cursor when it is over none, and the point on its edge closest to the cursor: the
+    // cursor is drawn there in its "outside" colour, so it never disappears between windows
+    public Hit NearestEdge(float cx, float cy) {
+        var best = new Hit();
+        float bestD = float.MaxValue;
+        foreach (var p in Windows) {
+            if (!p.Shown || !p.Live || p.PicW == 0) continue;
+            float fx = (cx - p.Left) / p.Scale, fy = (p.Top - cy) / p.Scale;
+            float qx = Math.Max(0, Math.Min(p.PicW - 1, fx)), qy = Math.Max(0, Math.Min(p.PicH - 1, fy));
+            float d = ((fx - qx) * (fx - qx) + (fy - qy) * (fy - qy)) * p.Scale * p.Scale;
+            if (d >= bestD) continue;
+            bestD = d;
+            best.P = p;
+            best.PicX = (int)qx;
+            best.PicY = (int)qy;
+        }
+        return best;
     }
     public Placement Add(IntPtr hwnd, string exe, string title) {
         var p = new Placement();
