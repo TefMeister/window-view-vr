@@ -93,6 +93,9 @@ class ViewUi : Form {
         Style(refreshBtn, "REFRESH");
         refreshBtn.Width = 110;
         refreshBtn.Click += delegate { RefreshOpen(); };
+        // v1.2: Style() docks a button to Fill, which a FlowLayoutPanel does not lay out: on the home PC both buttons
+        // were not drawn at all, leaving an empty strip under the list (Tefa 2026-10-24: "where?")
+        foreach (var b in new[] { addBtn, refreshBtn }) { b.Dock = DockStyle.None; b.Height = 28; }
         btns.Controls.Add(addBtn);
         btns.Controls.Add(refreshBtn);
         mid.Controls.Add(openList);
