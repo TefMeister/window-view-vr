@@ -84,6 +84,8 @@ tried again:
   3 cm of the windows, is twice the size with a thick outline, and turns yellow on the nearest window's edge while it is
   between windows.
 
+v1.2 worn the same evening, home PC, real headset (Tefa): *"this works really well now!"*
+
 ## Limits
 
 - **OpenXR games only**, drawing with **D3D11 or D3D12** (all RE Engine games do). Vulkan and OpenGL come later.
