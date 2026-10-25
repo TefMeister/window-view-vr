@@ -21,7 +21,7 @@
 #define WINDOW_VIEW_MAX_H 1600
 #define WINDOW_VIEW_SLOT_BYTES (WINDOW_VIEW_MAX_W * WINDOW_VIEW_MAX_H * 4)   // one pixel buffer
 #define WINDOW_VIEW_SLOT_MAPPING_BYTES (2 * WINDOW_VIEW_SLOT_BYTES)        // both buffers of one slot
-#define WINDOW_VIEW_HEADER_SIZE 628     // bytes; the app maps exactly this much (WindowView.cs SIZE)
+#define WINDOW_VIEW_HEADER_SIZE 636     // bytes; the app maps exactly this much (WindowView.cs SIZE)
 
 // which graphics API the game binds (header `api`)
 #define WINDOW_VIEW_API_NONE 0
@@ -72,7 +72,7 @@ struct WindowViewShared {
     float trigger;                   // 572  layer: right trigger 0..1
     float squeeze;                   // 576  layer: right grip 0..1
     float stick_y;                   // 580  layer: right stick up (+) / down (-)
-    volatile LONG buttons;           // 584  layer: 1 = A, 2 = Y (left; B on Index), 4 = B
+    volatile LONG buttons;           // 584  layer: 1 = A, 2 = Y (left; B on Index), 4 = B, 8 = X (left; A on Index)
     volatile LONG ray_seq;           // 588  layer: +1 per frame with a ray
     // 1.5 (Tefa: "the ability to grab these windows with LG and RG, two windows at once as well one in left and one in right hand")
     volatile LONG lray_valid;        // 592  layer: 1 = the left ray below is this frame's
@@ -80,7 +80,9 @@ struct WindowViewShared {
     float lray_d[3];                 // 608
     float lsqueeze;                  // 620  layer: left grip 0..1
     float lstick_y;                  // 624  layer: left stick up (+) / down (-)
-};                                   // 628 bytes
+    // 1.5: another app borrowing the buttons (Hand Poser's nudge: X / Y / A / B step the ticked sliders, a grip repeats them)
+    uint64_t button_claim_ms;        // 628  that app: GetTickCount64() while it wants them; Window View leaves A, Y and the grips alone then
+};                                   // 636 bytes
 #pragma pack(pop)
 static_assert(sizeof(WindowViewSlot) == 40, "the app reads this layout by offset");
 static_assert(sizeof(WindowViewShared) == WINDOW_VIEW_HEADER_SIZE, "the app reads this layout by offset");

@@ -157,6 +157,10 @@ class Pointer : IDisposable {
         lastSeq = seq;
         V3 lo, ld; float lsq, lstick;
         bool leftOk = shared.ReadLeftRay(out lo, out ld, out lsq, out lstick);
+        // Hand Poser's nudge borrows A, Y, X, B and both grips (Tefa: "X is -1, Y is -5 and holding LG makes X and Y repeat");
+        // then nothing here is carried, right-clicked or recentred, but the trigger still clicks and the stick still scrolls
+        bool claimed = shared.ButtonsClaimed;
+        if (claimed) { sq = 0; lsq = 0; buttons = 0; }
         Placement hover; float hu = 0, hv = 0;
         lock (desk.Lock) {
             CarryStep(right, o, d, sq, right.Window != null ? stick : 0, distance, room, dt, left.Window, "right");

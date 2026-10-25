@@ -35,7 +35,7 @@ constexpr float kTriggerDown = 0.6f, kTriggerUp = 0.4f;   // the app uses the sa
 
 XrActionSet g_set = XR_NULL_HANDLE;
 bool g_actions_failed = false;
-enum { A_LCLICK, A_RCLICK, A_TRIGGER, A_SQUEEZE, A_STICK, A_AIM, A_A, A_B, A_Y, A_LSQUEEZE, A_LSTICK, A_LAIM, A_COUNT };
+enum { A_LCLICK, A_RCLICK, A_TRIGGER, A_SQUEEZE, A_STICK, A_AIM, A_A, A_B, A_Y, A_LSQUEEZE, A_LSTICK, A_LAIM, A_X, A_COUNT };
 XrAction g_act[A_COUNT]{};
 
 // the game's controller spaces and inputs, held while CONTROL mode is on (both hands, everything the game asks for)
@@ -77,6 +77,7 @@ bool make_actions() {
         {"wv_left_grip", "WV left grip", XR_ACTION_TYPE_FLOAT_INPUT},
         {"wv_left_stick", "WV left stick", XR_ACTION_TYPE_VECTOR2F_INPUT},
         {"wv_left_aim", "WV left aim", XR_ACTION_TYPE_POSE_INPUT},
+        {"wv_x", "WV X", XR_ACTION_TYPE_BOOLEAN_INPUT},
     };
     for (int i = 0; i < A_COUNT; ++i) {
         XrActionCreateInfo ai{XR_TYPE_ACTION_CREATE_INFO};
@@ -108,6 +109,7 @@ std::vector<XrActionSuggestedBinding> our_bindings(XrPath profile) {
     add(A_LSQUEEZE, "/user/hand/left/input/squeeze/value");
     add(A_LSTICK, "/user/hand/left/input/thumbstick");
     add(A_LAIM, "/user/hand/left/input/aim/pose");
+    add(A_X, touch ? "/user/hand/left/input/x/click" : "/user/hand/left/input/a/click");
     return out;
 }
 
@@ -342,7 +344,7 @@ void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime whe
     sh->trigger = read_float(xs, A_TRIGGER);
     sh->squeeze = read_float(xs, A_SQUEEZE);
     sh->stick_y = read_vec2(xs, A_STICK).y;
-    sh->buttons = (read_bool(xs, A_A) ? 1 : 0) | (read_bool(xs, A_Y) ? 2 : 0) | (read_bool(xs, A_B) ? 4 : 0);
+    sh->buttons = (read_bool(xs, A_A) ? 1 : 0) | (read_bool(xs, A_Y) ? 2 : 0) | (read_bool(xs, A_B) ? 4 : 0) | (read_bool(xs, A_X) ? 8 : 0);
     sh->ray_valid = 1;
     InterlockedIncrement(&sh->ray_seq);
 }

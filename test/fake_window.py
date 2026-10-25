@@ -6,7 +6,7 @@ window. At the end it prints what the layer reported into the header (LAYER: ...
 --resize: after 3 s the picture becomes 300 x 300, green left / yellow right (the layer must remake its swapchain).
 --room: the room mode on (1.4), with a recenter asked; --depth D: the window pushed back to D times the distance.
 --ctrl: CONTROL mode switched on from the start (1.5), as the left stick click would.
-Layout: shared.h (header 628 bytes, slots at 180 + 40 * n; pixel mapping = two 2560x1600 BGRA buffers).
+Layout: shared.h (header 636 bytes, slots at 180 + 40 * n; pixel mapping = two 2560x1600 BGRA buffers).
 """
 import argparse
 import ctypes
@@ -17,7 +17,7 @@ import time
 NAME = "Local\\FlatToVR_WindowView_v2"
 SLOT_NAME = "Local\\FlatToVR_WindowView_v2_slot%d"
 MAGIC, VERSION = 0x57564956, 2
-HEADER, SLOTS_OFF, SLOT = 628, 180, 40
+HEADER, SLOTS_OFF, SLOT = 636, 180, 40
 SLOT_BYTES = 2560 * 1600 * 4
 APP_HEARTBEAT, LAYER_HEARTBEAT, LAYER_PID, API, GAME_NAME = 8, 16, 24, 28, 36
 DISTANCE, QUADS, UPLOADS, LAST_ERROR = 164, 168, 172, 176

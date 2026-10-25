@@ -48,13 +48,13 @@ class Shared : IDisposable {
     // v2 (1.4): the room mode and per-window depth (shared.h); new names, so an old layer and a new app never mix
     const string NAME = @"Local\FlatToVR_WindowView_v2", SLOT_NAME = @"Local\FlatToVR_WindowView_v2_slot{0}";
     const uint MAGIC = 0x57564956, VERSION = 2;
-    public const int SIZE = 628, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
+    public const int SIZE = 636, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
     public const long SLOT_BYTES = MAX_W * MAX_H * 4L;
     const int APP_HEARTBEAT = 8, LAYER_HEARTBEAT = 16, LAYER_PID = 24, API = 28, GAME_NAME = 36, DISTANCE = 164,
               QUADS = 168, UPLOADS = 172, LAST_ERROR = 176, SLOTS_OFF = 180, SLOT = 40, ROOM_MODE = 500, RECENTER_SEQ = 504, ANCHOR_SEEN = 508,
               CURSOR_VISIBLE = 512, CURSOR_SLOT = 516, CURSOR_P = 520, CURSOR_EDGE = 532, CTRL_MODE = 536, POINTER_READY = 540,
               RAY_VALID = 544, RAY_O = 548, RAY_D = 560, TRIGGER = 572, SQUEEZE = 576, STICK_Y = 580, BUTTONS = 584, RAY_SEQ = 588,
-              LRAY_VALID = 592, LRAY_O = 596, LRAY_D = 608, LSQUEEZE = 620, LSTICK_Y = 624;
+              LRAY_VALID = 592, LRAY_O = 596, LRAY_D = 608, LSQUEEZE = 620, LSTICK_Y = 624, BUTTON_CLAIM = 628;
     const int S_VISIBLE = 0, S_WIDTH = 4, S_HEIGHT = 8, S_X = 12, S_Y = 16, S_SCALE = 20, S_FRAME = 24, S_BUFFER = 28, S_SHOWN = 32, S_DEPTH = 36;
     const ulong CONNECTED_WITHIN_MS = 3000;   // a game counts as connected if the layer was heard from this recently
     readonly MemoryMappedFile file;
@@ -102,6 +102,8 @@ class Shared : IDisposable {
         buttons = view.ReadInt32(BUTTONS);
         return view.ReadInt32(RAY_VALID) != 0;
     }
+    // another app (Hand Poser's nudge) is using X / Y / A / B and the grips right now
+    public bool ButtonsClaimed { get { ulong c = view.ReadUInt64(BUTTON_CLAIM); return c != 0 && GetTickCount64() - c < 500; } }
     public bool ReadLeftRay(out V3 o, out V3 d, out float squeeze, out float stickY) {
         o = new V3(view.ReadSingle(LRAY_O), view.ReadSingle(LRAY_O + 4), view.ReadSingle(LRAY_O + 8));
         d = new V3(view.ReadSingle(LRAY_D), view.ReadSingle(LRAY_D + 4), view.ReadSingle(LRAY_D + 8));

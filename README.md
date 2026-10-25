@@ -49,7 +49,8 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    you can walk round them. Point with the right controller: **trigger** clicks (hold it to drag a slider), **A** is the
    right mouse button, the **right stick** scrolls, **Y** brings every window back in front of you. Either **grip**
    picks up the window that hand points at and carries it, one in each hand at once; that hand's stick pushes it away
-   or pulls it in. Click the left thumbstick again to give the game its controllers back.
+   or pulls it in. Click the left thumbstick again to give the game its controllers back. While the Hand Poser has sliders
+   ticked, X / Y / A / B and the grips step those sliders instead (see the Hand Poser's readme).
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
