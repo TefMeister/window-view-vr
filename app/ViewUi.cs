@@ -32,7 +32,8 @@ class ViewUi : Form {
     readonly Shared shared = new Shared();
     readonly Desk desk = new Desk();
     readonly InputRouter input;
-    readonly Button layerBtn = new Button(), inputBtn = new Button(), addBtn = new Button();
+    readonly Button layerBtn = new Button(), inputBtn = new Button(), addBtn = new Button(), roomBtn = new Button();
+    static readonly string SettingsFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowViewVR", "settings.txt");
     readonly FlowLayoutPanel rows = new FlowLayoutPanel();
     readonly Label status = new SkinLabel(), hint = new SkinLabel(), dropHint = new SkinLabel();
     readonly System.Windows.Forms.Timer uiTimer = new System.Windows.Forms.Timer();
@@ -70,7 +71,7 @@ class ViewUi : Form {
 
         var top = new TableLayoutPanel();
         top.Dock = DockStyle.Top;
-        top.Height = 112;
+        top.Height = 160;
         top.ColumnCount = 2;
         top.BackColor = Color.Transparent;
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -84,10 +85,18 @@ class ViewUi : Form {
         inputBtn.Click += delegate { input.SetOn(!input.On); };
         top.Controls.Add(layerBtn, 0, 0);
         top.Controls.Add(inputBtn, 1, 0);
+        // 1.4 (Tefa: "can the Window view actually leave the windows in place inside the VR headset ... with the on/off switch
+        // and leave it off for now please"): where the windows live, saved, OFF (following the head) until switched
+        Style(roomBtn, "");
+        roomBtn.Height = 40;
+        roomBtn.Click += delegate { SetRoom(!shared.RoomMode); };
+        top.Controls.Add(roomBtn, 0, 1);
+        top.SetColumnSpan(roomBtn, 2);
         hint.Dock = DockStyle.Fill;
-        hint.Text = "Switch the layer ON before the game starts. Windows follow your head; drag one by its dark header, resize by its corner.";
+        hint.Text = "Switch the layer ON before the game starts. Drag a window by its dark header, resize it by its corner. " +
+                    "With the mouse on the windows: F9 pushes the window under the cursor back, F10 pulls it in, F11 brings all of them in front of you.";
         hint.ForeColor = Dim;
-        top.Controls.Add(hint, 0, 1);
+        top.Controls.Add(hint, 0, 2);
         top.SetColumnSpan(hint, 2);
 
         var add = new FlowLayoutPanel();
@@ -140,6 +149,9 @@ class ViewUi : Form {
 
         desk.Load();
         FindMissingPaths();
+        shared.RoomMode = ReadSetting("room") == "1";   // off unless it was switched on and saved
+        ShowRoom();
+        input.OnRecenter += delegate { shared.Recenter(); };
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
         input.Start();
         Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
@@ -173,6 +185,30 @@ class ViewUi : Form {
         inputBtn.BackColor = input.On ? OnColor : OffColor;
     }
     void Say(string text) { status.Text = text; messageAt = Environment.TickCount; }
+
+    // ---- 1.4: the room mode -------------------------------------------------------------------------------------------
+    void SetRoom(bool on) {
+        shared.RoomMode = on;
+        if (on) shared.Recenter();   // they start where you look now
+        WriteSetting("room", on ? "1" : "0");
+        ShowRoom();
+        Say(on ? "Windows now stay in the room. F11 (with the mouse on the windows) brings them back in front of you." : "Windows follow your head again.");
+    }
+    void ShowRoom() {
+        bool on = shared.RoomMode;
+        roomBtn.Text = on ? "WINDOWS: STAY IN THE ROOM   (click: follow my head)" : "WINDOWS: FOLLOW MY HEAD   (click: stay in the room)";
+        roomBtn.BackColor = on ? OnColor : OffColor;
+    }
+    static string ReadSetting(string key) {
+        try { foreach (var line in File.ReadAllLines(SettingsFile)) if (line.StartsWith(key + "=")) return line.Substring(key.Length + 1); } catch (Exception) { }
+        return "";
+    }
+    static void WriteSetting(string key, string value) {
+        var lines = new List<string>();
+        try { foreach (var line in File.ReadAllLines(SettingsFile)) if (!line.StartsWith(key + "=")) lines.Add(line); } catch (Exception) { }
+        lines.Add(key + "=" + value);
+        try { Directory.CreateDirectory(Path.GetDirectoryName(SettingsFile)); File.WriteAllLines(SettingsFile, lines.ToArray()); } catch (Exception) { }
+    }
 
     protected override void OnFormClosing(FormClosingEventArgs e) {
         running = false;
@@ -454,6 +490,7 @@ class ViewUi : Form {
     void Tick() {
         if (Environment.TickCount - lastRelink > 1000) { lastRelink = Environment.TickCount; Relink(); }
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
+        if (shared.GameConnected && shared.RoomMode) game += shared.AnchorSet ? ", windows in the room" : ", placing the windows...";
         string err = shared.LastError != 0 ? "   last error " + shared.LastError : "";
         string where = "";
         if (input.On) {
@@ -492,11 +529,11 @@ class ViewUi : Form {
                 Capture cap;
                 if (!caps.TryGetValue(p, out cap)) caps[p] = cap = new Capture();
                 Point? cursor = under.P == p ? new Point(under.PicX, under.PicY) : (Point?)null;
-                float x, y, scale, opacity;
-                lock (desk.Lock) { x = p.X; y = p.Y; scale = p.Scale; opacity = p.Opacity; }
+                float x, y, scale, opacity, depth;
+                lock (desk.Lock) { x = p.X; y = p.Y; scale = p.Scale; opacity = p.Opacity; depth = p.Depth; }
                 if (cap.Grab(p.Hwnd, AppName(p), opacity, cursor, outside)) {
                     lock (desk.Lock) { p.PicW = cap.Width; p.PicH = cap.Height; }
-                    shared.Publish(p.Slot, cap.Pixels, cap.Width, cap.Height, x, y, scale);
+                    shared.Publish(p.Slot, cap.Pixels, cap.Width, cap.Height, x, y, scale, depth);
                 }
             }
             foreach (var kv in new List<KeyValuePair<Placement, Capture>>(caps)) if (!list.Contains(kv.Key)) { kv.Value.Dispose(); caps.Remove(kv.Key); }

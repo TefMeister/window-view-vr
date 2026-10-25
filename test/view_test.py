@@ -6,7 +6,8 @@ for THAT process only (XR_API_LAYER_PATH + XR_ENABLE_API_LAYERS; the registry is
 graphics API and its exe name, uploaded at least one picture and submitted quads, with no error noted. What the quad
 LOOKS like is checked by eye with the simulator's screenshot (the MCP capture_screenshot tool) during a run.
 
-    python view_test.py [d3d11|d3d12|both] [--runtime <runtime json>] [--seconds 6] [--resize]
+    python view_test.py [d3d11|d3d12|both] [--runtime <runtime json>] [--seconds 6] [--resize] [--room]
+--room (1.4): the room mode on; also PASS only when the layer set its anchor in the room.
 Exit 0 = every requested API passed.
 """
 import argparse
@@ -39,6 +40,8 @@ def run_one(api, args, env):
     fake = [sys.executable, "-I", os.path.join(HERE, "fake_window.py"), "--seconds", str(args.seconds + 2)]
     if args.resize:
         fake.append("--resize")
+    if args.room:
+        fake += ["--room", "--depth", "1.5"]
     fw = subprocess.Popen(fake, stdout=subprocess.PIPE, text=True)
     game = subprocess.run([args.app, args.loader, api, str(args.seconds)], env=env, capture_output=True, text=True)
     report = fw.communicate()[0].strip()
@@ -54,6 +57,8 @@ def run_one(api, args, env):
         "quads submitted": int(got.get("quads", 0)) >= 1,
         "no error noted": int(got.get("last_error", 1)) == 0,
     }
+    if args.room:
+        checks["room mode on and the anchor set in the room"] = int(got.get("room", 0)) == 1 and int(got.get("anchor_set", 0)) == 1
     for name, ok in checks.items():
         print(("  ok   " if ok else "  FAIL ") + name)
     return all(checks.values())
@@ -68,6 +73,7 @@ def main():
     ap.add_argument("--dll", default=os.path.join(HERE, "..", "dist", "window_view_layer.dll"))
     ap.add_argument("--seconds", type=float, default=6.0)
     ap.add_argument("--resize", action="store_true")
+    ap.add_argument("--room", action="store_true")
     args = ap.parse_args()
     if not args.loader:
         sys.exit("no openxr_loader.dll found; pass --loader")
@@ -76,7 +82,8 @@ def main():
         json.dump({"file_format_version": "1.0.0", "api_layer": {
             "name": LAYER_NAME, "library_path": os.path.abspath(args.dll), "api_version": "1.0",
             "implementation_version": "1", "description": "Window View (test)"}}, f)
-    env = dict(os.environ, XR_RUNTIME_JSON=args.runtime, XR_API_LAYER_PATH=layer_dir, XR_ENABLE_API_LAYERS=LAYER_NAME)
+    env = dict(os.environ, XR_RUNTIME_JSON=args.runtime, XR_API_LAYER_PATH=layer_dir, XR_ENABLE_API_LAYERS=LAYER_NAME,
+               DISABLE_WINDOW_VIEW_LAYER="1")   # the installed copy (registered with Layer ON) stays out of the test
     apis = ["d3d11", "d3d12"] if args.api == "both" else [args.api]
     results = {api: run_one(api, args, env) for api in apis}
     print("RESULT: " + "  ".join("%s %s" % (k, "PASS" if v else "FAIL") for k, v in results.items()))

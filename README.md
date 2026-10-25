@@ -39,6 +39,11 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    keyboard types into the one you last clicked. The game gets neither. Drag a window by its dark header to move it,
    drag the three little lines in its bottom-right corner to resize it.
 5. Press **Page Down** to give the mouse and keyboard back to the game and the desktop.
+6. Optional (1.4): press **WINDOWS: FOLLOW MY HEAD** so it says **STAY IN THE ROOM**. The windows then stay where they
+   are in your real room, so you can walk up to them, look past them and turn away; they no longer follow your head.
+   With the mouse on the windows, **F9** pushes the window under the cursor further away, **F10** pulls it closer (it
+   shrinks and grows like a real object), and **F11** brings every window back in front of you. The setting is
+   remembered; it starts OFF.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
@@ -60,7 +65,7 @@ Windows come back where you left them next time (matched by program and title), 
   posted to the real control under the desk cursor as ordinary window messages; letters go as `WM_CHAR`, other keys
   as `WM_KEYDOWN`/`WM_KEYUP`. The game keeps the Windows focus the whole time, so controllers and the gamepad keep
   working. Closing the app always hands the mouse and keyboard back.
-- `shared.h` is the hand-over: one 500-byte header (8 slots: where, how big, which pixel buffer is finished, plus the
+- `shared.h` is the hand-over: one 512-byte header (8 slots: where, how big, which pixel buffer is finished, plus the
   layer's heartbeat, the game's name and graphics API, counters) and one double-buffered BGRA pixel block per slot.
 
 ## Tested
@@ -95,6 +100,15 @@ flickered white whenever a window was photographed), and the window's background
 on the sill and a sunny day outside, finely pixelated with the scan lines and rolling light of the Lanes theme. Tested
 on the home PC: an app picked with **ADD AN APP...** was started and joined the list, and Hand Poser joined by itself when
 it was opened. Dropping a shortcut is not yet tried by hand.
+
+1.4, 2026-10-25 (Tefa: *"can the Window view actually leave the windows in place inside the VR headset, so they are
+not stuck to my view ... added keyboard keys to push the window back and forward"*): the room mode and F9 / F10 / F11.
+The layer puts the windows in the headset's room space around an anchor taken from where the head looks (level, at the
+head's height) and turns each to face it; the headset itself holds them still, so they stay steady even when the game
+stutters. "In the room" means the real room, not the game world: turning the character with the stick leaves them
+where they are. Tested on the OpenXR Simulator, home PC, `[verified-numerically 2026-10-25, n=1 each]`: `view_test.py`
+D3D11 and D3D12 PASS in both modes, and with `--room` the layer set its anchor; a photo of the preview with the head
+turned 25 degrees showed the window slid aside in perspective, held in the room. Not yet worn in a real headset.
 
 ## Limits
 

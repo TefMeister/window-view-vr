@@ -45,13 +45,14 @@ static class Api {
 }
 
 class Shared : IDisposable {
-    const string NAME = @"Local\FlatToVR_WindowView_v1", SLOT_NAME = @"Local\FlatToVR_WindowView_v1_slot{0}";
-    const uint MAGIC = 0x57564956, VERSION = 1;
-    public const int SIZE = 500, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
+    // v2 (1.4): the room mode and per-window depth (shared.h); new names, so an old layer and a new app never mix
+    const string NAME = @"Local\FlatToVR_WindowView_v2", SLOT_NAME = @"Local\FlatToVR_WindowView_v2_slot{0}";
+    const uint MAGIC = 0x57564956, VERSION = 2;
+    public const int SIZE = 512, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
     public const long SLOT_BYTES = MAX_W * MAX_H * 4L;
     const int APP_HEARTBEAT = 8, LAYER_HEARTBEAT = 16, LAYER_PID = 24, API = 28, GAME_NAME = 36, DISTANCE = 164,
-              QUADS = 168, UPLOADS = 172, LAST_ERROR = 176, SLOTS_OFF = 180, SLOT = 40;
-    const int S_VISIBLE = 0, S_WIDTH = 4, S_HEIGHT = 8, S_X = 12, S_Y = 16, S_SCALE = 20, S_FRAME = 24, S_BUFFER = 28, S_SHOWN = 32;
+              QUADS = 168, UPLOADS = 172, LAST_ERROR = 176, SLOTS_OFF = 180, SLOT = 40, ROOM_MODE = 500, RECENTER_SEQ = 504, ANCHOR_SEEN = 508;
+    const int S_VISIBLE = 0, S_WIDTH = 4, S_HEIGHT = 8, S_X = 12, S_Y = 16, S_SCALE = 20, S_FRAME = 24, S_BUFFER = 28, S_SHOWN = 32, S_DEPTH = 36;
     const ulong CONNECTED_WITHIN_MS = 3000;   // a game counts as connected if the layer was heard from this recently
     readonly MemoryMappedFile file;
     readonly MemoryMappedViewAccessor view;
@@ -76,6 +77,11 @@ class Shared : IDisposable {
     public int GameApi { get { return view.ReadInt32(API); } }
     public int Uploads { get { return view.ReadInt32(UPLOADS); } }
     public int LastError { get { return view.ReadInt32(LAST_ERROR); } }
+    // the room mode: 1 = the windows stay in the room around an anchor, 0 = they follow the head (the layer reads it each frame)
+    public bool RoomMode { get { return view.ReadInt32(ROOM_MODE) != 0; } set { view.Write(ROOM_MODE, value ? 1 : 0); } }
+    // put the anchor where the head looks now; AnchorSet says the layer has done it
+    public void Recenter() { view.Write(RECENTER_SEQ, view.ReadInt32(RECENTER_SEQ) + 1); }
+    public bool AnchorSet { get { return view.ReadInt32(ANCHOR_SEEN) == view.ReadInt32(RECENTER_SEQ); } }
     public string GameName {
         get {
             var chars = new char[64];
@@ -86,7 +92,7 @@ class Shared : IDisposable {
     }
     public void Hide(int slot) { if (slot >= 0 && slot < SLOTS) view.Write(Off(slot) + S_VISIBLE, 0); }
     // one finished picture: into the buffer the layer is not reading, then the slot's numbers, the frame counter last
-    public void Publish(int slot, byte[] bgra, int w, int h, float x, float y, float scale) {
+    public void Publish(int slot, byte[] bgra, int w, int h, float x, float y, float scale, float depth) {
         if (slotViews[slot] == null) {
             slotFiles[slot] = MemoryMappedFile.CreateOrOpen(string.Format(SLOT_NAME, slot), 2 * SLOT_BYTES);
             slotViews[slot] = slotFiles[slot].CreateViewAccessor(0, 2 * SLOT_BYTES);
@@ -99,6 +105,7 @@ class Shared : IDisposable {
         view.Write(off + S_X, x);
         view.Write(off + S_Y, y);
         view.Write(off + S_SCALE, scale);
+        view.Write(off + S_DEPTH, depth);
         view.Write(off + S_BUFFER, next);
         Thread.MemoryBarrier();
         view.Write(off + S_FRAME, view.ReadInt32(off + S_FRAME) + 1);

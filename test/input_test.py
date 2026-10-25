@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SIM_RUNTIME = r"D:\claude video game stuff\tools\OpenXR-Simulator\openxr_simulator.json"
 LAYER_NAME = "XR_APILAYER_FLATTOVR_window_view"
-NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v1", 500, 180
+NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v2", 512, 180
 u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
 VK_PRIOR, VK_NEXT = 0x21, 0x22
 
@@ -152,7 +152,8 @@ def main():
     with open(os.path.join(layer_dir, "window_view_layer.json"), "w") as f:
         json.dump({"file_format_version": "1.0.0", "api_layer": {"name": LAYER_NAME, "library_path": os.path.join(ROOT, "dist", "window_view_layer.dll"),
                                                                  "api_version": "1.0", "implementation_version": "1", "description": "Window View (test)"}}, f)
-    env = dict(os.environ, XR_RUNTIME_JSON=SIM_RUNTIME, XR_API_LAYER_PATH=layer_dir, XR_ENABLE_API_LAYERS=LAYER_NAME)
+    env = dict(os.environ, XR_RUNTIME_JSON=SIM_RUNTIME, XR_API_LAYER_PATH=layer_dir, XR_ENABLE_API_LAYERS=LAYER_NAME,
+               DISABLE_WINDOW_VIEW_LAYER="1")   # the installed copy (registered with Layer ON) stays out of the test
     import xr
     loader = os.path.join(os.path.dirname(xr.__file__), "library", "windows_x86_64", "openxr_loader.dll")
     game = subprocess.Popen([os.path.join(ROOT, "build", "xr_test_app.exe"), loader, "d3d11", "40"], env=env, stdout=subprocess.PIPE, text=True)

@@ -14,12 +14,16 @@ class Placement {
     public string Exe = "", Title = "";   // Title "" = any window of that exe (an app added by ADD AN APP or dropped on the window)
     public string Path = "";              // the exe's full path: its icon on the row, and how it is started when it is not running
     public float X, Y, Scale = Desk.DEFAULT_SCALE, Opacity = 1f;
+    // 1.4: how far back the window sits, as a share of the desk's distance (F9 / F10). On the desk (the plane the cursor moves
+    // on) a window pushed back looks smaller: it is drawn at Scale / Depth metres per pixel there, at the same centre.
+    public float Depth = 1f;
+    public float Seen { get { return Scale / Depth; } }
     public bool Shown = true;
     public int Slot = -1;
     public int PicW, PicH;           // the last picture's size, set by the capture loop
     public bool Live { get { return Hwnd != IntPtr.Zero; } }
-    public float Left { get { return X - PicW * Scale / 2; } }
-    public float Top { get { return Y + PicH * Scale / 2; } }
+    public float Left { get { return X - PicW * Seen / 2; } }
+    public float Top { get { return Y + PicH * Seen / 2; } }
 }
 
 enum HitKind { None, Header, Grip, Body }
@@ -32,6 +36,7 @@ struct Hit {
 
 class Desk {
     public const float DEFAULT_SCALE = 0.0006f, MIN_SCALE = 0.0002f, MAX_SCALE = 0.003f;   // metres per pixel
+    public const float MIN_DEPTH = 0.4f, MAX_DEPTH = 4f, DEPTH_STEP = 1.15f;   // 1.4: F9 / F10 push a window back / pull it in by this
     public const float CURSOR_SPEED = 0.0006f;   // metres of desk per mouse pixel (1 mouse px = 1 window px at the default size)
     public const float REACH_X = 0.9f, REACH_Y = 0.6f;   // how far the cursor may go, metres
     public const float CURSOR_MARGIN = 0.03f;   // v1.2: how far past the windows' outline the cursor may go, metres
@@ -45,7 +50,7 @@ class Desk {
         for (int i = Windows.Count - 1; i >= 0; --i) {
             var p = Windows[i];
             if (!p.Shown || !p.Live || p.PicW == 0) continue;
-            int px = (int)Math.Floor((cx - p.Left) / p.Scale), py = (int)Math.Floor((p.Top - cy) / p.Scale);
+            int px = (int)Math.Floor((cx - p.Left) / p.Seen), py = (int)Math.Floor((p.Top - cy) / p.Seen);
             if (px < 0 || py < 0 || px >= p.PicW || py >= p.PicH) continue;
             hit.P = p;
             hit.PicX = px;
@@ -62,8 +67,8 @@ class Desk {
         bool any = false;
         foreach (var p in Windows) {
             if (!p.Shown || !p.Live || p.PicW == 0) continue;
-            float l = p.Left - CURSOR_MARGIN, r = p.Left + p.PicW * p.Scale + CURSOR_MARGIN;
-            float t = p.Top + CURSOR_MARGIN, b = p.Top - p.PicH * p.Scale - CURSOR_MARGIN;
+            float l = p.Left - CURSOR_MARGIN, r = p.Left + p.PicW * p.Seen + CURSOR_MARGIN;
+            float t = p.Top + CURSOR_MARGIN, b = p.Top - p.PicH * p.Seen - CURSOR_MARGIN;
             if (!any) { minX = l; maxX = r; minY = b; maxY = t; any = true; }
             else { minX = Math.Min(minX, l); maxX = Math.Max(maxX, r); minY = Math.Min(minY, b); maxY = Math.Max(maxY, t); }
         }
@@ -87,9 +92,9 @@ class Desk {
         float bestD = float.MaxValue;
         foreach (var p in Windows) {
             if (!p.Shown || !p.Live || p.PicW == 0) continue;
-            float fx = (cx - p.Left) / p.Scale, fy = (p.Top - cy) / p.Scale;
+            float fx = (cx - p.Left) / p.Seen, fy = (p.Top - cy) / p.Seen;
             float qx = Math.Max(0, Math.Min(p.PicW - 1, fx)), qy = Math.Max(0, Math.Min(p.PicH - 1, fy));
-            float d = ((fx - qx) * (fx - qx) + (fy - qy) * (fy - qy)) * p.Scale * p.Scale;
+            float d = ((fx - qx) * (fx - qx) + (fy - qy) * (fy - qy)) * p.Seen * p.Seen;
             if (d >= bestD) continue;
             bestD = d;
             best.P = p;
@@ -111,6 +116,14 @@ class Desk {
         return p;
     }
     public void Remove(Placement p) { Windows.Remove(p); }
+    // 1.4: the window under the cursor (or the nearest one) pushed back (steps > 0) or pulled in (steps < 0)
+    public Placement Push(int steps) {
+        var hit = HitTest(CursorX, CursorY);
+        if (hit.P == null) hit = NearestEdge(CursorX, CursorY);
+        if (hit.P == null) return null;
+        hit.P.Depth = Math.Max(MIN_DEPTH, Math.Min(MAX_DEPTH, hit.P.Depth * (float)Math.Pow(DEPTH_STEP, steps)));
+        return hit.P;
+    }
     public void Raise(Placement p) { if (Windows.Remove(p)) Windows.Add(p); }
     public int FreeSlot() {
         for (int s = 0; s < Shared.SLOTS; ++s) {
@@ -124,7 +137,7 @@ class Desk {
         var lines = new List<string>();
         var ci = CultureInfo.InvariantCulture;
         foreach (var p in Windows)
-            lines.Add(string.Join("|", new[] { p.Exe, p.Title.Replace("|", " "), p.X.ToString(ci), p.Y.ToString(ci), p.Scale.ToString(ci), p.Opacity.ToString(ci), p.Shown ? "1" : "0", p.Path }));
+            lines.Add(string.Join("|", new[] { p.Exe, p.Title.Replace("|", " "), p.X.ToString(ci), p.Y.ToString(ci), p.Scale.ToString(ci), p.Opacity.ToString(ci), p.Shown ? "1" : "0", p.Path, p.Depth.ToString(ci) }));
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(File));
             System.IO.File.WriteAllLines(File, lines.ToArray());
@@ -146,6 +159,8 @@ class Desk {
             float.TryParse(f[5], NumberStyles.Float, ci, out p.Opacity);
             p.Shown = f[6] == "1";
             if (f.Length > 7) p.Path = f[7];   // v1.3: the exe's path (older layout files have none)
+            if (f.Length > 8) float.TryParse(f[8], NumberStyles.Float, ci, out p.Depth);   // 1.4
+            p.Depth = Math.Max(MIN_DEPTH, Math.Min(MAX_DEPTH, p.Depth == 0 ? 1f : p.Depth));
             p.Scale = Math.Max(MIN_SCALE, Math.Min(MAX_SCALE, p.Scale == 0 ? DEFAULT_SCALE : p.Scale));
             p.Opacity = Math.Max(0.1f, Math.Min(1f, p.Opacity == 0 ? 1f : p.Opacity));
             p.Slot = FreeSlot();

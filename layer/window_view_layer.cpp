@@ -11,6 +11,12 @@
 // OpenXR runtime (registered as an implicit layer by the app). At every xrEndFrame it copies each slot whose picture
 // changed into a swapchain of its own and appends one head-locked quad layer per visible slot after the game's own
 // layers. The game never knows. Nothing here reads the mouse or keyboard: that is the app's job.
+//
+// 1.4 (2026-10-25, Tefa: "can the Window view actually leave the windows in place inside the VR headset, so they are not
+// stuck to my view, but look like they are inside the game world essentially"): a room mode, off by default. The quads then
+// live in the LOCAL reference space, around an anchor set from where the head looked (level, at the head's height) when the
+// mode was switched on or the app asked for a recenter; each faces the anchor, and the runtime holds them still in the room.
+// A per-window depth pushes a window back (it shrinks with the distance, as a real object would), in either mode.
 #define XR_NO_PROTOTYPES
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -22,6 +28,7 @@
 #include <openxr/openxr_platform.h>
 #include <openxr/openxr_loader_negotiation.h>
 
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -37,6 +44,7 @@ PFN_xrCreateSession g_next_create_session = nullptr;
 PFN_xrDestroySession g_next_destroy_session = nullptr;
 PFN_xrEndFrame g_next_end_frame = nullptr;
 PFN_xrCreateReferenceSpace g_next_create_reference_space = nullptr;
+PFN_xrLocateSpace g_next_locate_space = nullptr;
 PFN_xrCreateSwapchain g_next_create_swapchain = nullptr;
 PFN_xrDestroySwapchain g_next_destroy_swapchain = nullptr;
 PFN_xrEnumerateSwapchainFormats g_next_enum_formats = nullptr;
@@ -71,6 +79,11 @@ struct Session {
     ID3D12Device* d12 = nullptr; ID3D12CommandQueue* queue = nullptr; ID3D12CommandAllocator* alloc = nullptr;
     ID3D12GraphicsCommandList* list = nullptr; ID3D12Fence* fence = nullptr; HANDLE fence_event = nullptr; UINT64 fence_value = 0;
     XrSpace view_space = XR_NULL_HANDLE;   // head-locked: the quads live here
+    XrSpace local_space = XR_NULL_HANDLE;  // the room mode: the quads live here, around the anchor
+    bool anchor_ok = false;
+    LONG anchor_seq = -1;
+    XrVector3f anchor_pos{0, 0, 0};
+    XrQuaternionf anchor_rot{0, 0, 0, 1};  // a turn about the vertical only
     Quad quads[WINDOW_VIEW_SLOTS];
     std::vector<uint8_t> staging;
 };
@@ -292,24 +305,64 @@ bool copy_pixels(Session& s, const WindowViewSlot& sl, const Quad& q, const uint
     return sl.frame == frame && sl.buffer == buf;
 }
 
+// ---- small vector / quaternion helpers for the room mode -------------------------------------------------------------
+XrQuaternionf q_mul(const XrQuaternionf& a, const XrQuaternionf& b) {
+    return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+XrVector3f q_rot(const XrQuaternionf& q, const XrVector3f& v) {
+    const XrQuaternionf p{v.x, v.y, v.z, 0}, c{-q.x, -q.y, -q.z, q.w};
+    const XrQuaternionf r = q_mul(q_mul(q, p), c);
+    return {r.x, r.y, r.z};
+}
+XrQuaternionf q_axis(float x, float y, float z, float angle) { const float h = angle * 0.5f, sn = std::sin(h); return {x * sn, y * sn, z * sn, std::cos(h)}; }
+
+bool ensure_space(XrSession xs, XrReferenceSpaceType type, XrSpace& space) {
+    if (space != XR_NULL_HANDLE) return true;
+    if (g_next_create_reference_space == nullptr) return false;
+    XrReferenceSpaceCreateInfo ci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    ci.referenceSpaceType = type;
+    ci.poseInReferenceSpace.orientation.w = 1.0f;
+    const XrResult r = g_next_create_reference_space(xs, &ci, &space);
+    if (XR_FAILED(r)) { note_error(r); space = XR_NULL_HANDLE; return false; }
+    return true;
+}
+
+// the anchor: where the head is, turned the way it looks but level (only the turn about the vertical is kept)
+void update_anchor(Session& s, WindowViewShared* sh, XrTime when) {
+    const LONG want = sh->recenter_seq;
+    if (s.anchor_ok && want == s.anchor_seq) return;
+    if (g_next_locate_space == nullptr || when == 0) return;
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    const XrResult r = g_next_locate_space(s.view_space, s.local_space, when, &loc);
+    if (XR_FAILED(r)) { note_error(r); return; }
+    const XrSpaceLocationFlags need = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    if ((loc.locationFlags & need) != need) return;   // tracking lost this frame: try again next frame
+    const XrVector3f fwd = q_rot(loc.pose.orientation, {0, 0, -1});
+    const float yaw = std::atan2(-fwd.x, -fwd.z);
+    s.anchor_pos = loc.pose.position;
+    s.anchor_rot = q_axis(0, 1, 0, yaw);
+    s.anchor_ok = true;
+    s.anchor_seq = want;
+    sh->anchor_seq_seen = want;
+}
+
 // everything this frame: refresh changed pictures and list one quad per visible slot (the quads vector is reserved by
 // the caller so the pointers taken afterwards stay put)
-void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& out) {
+void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& out, XrTime when) {
     auto* sh = shared();
     if (sh == nullptr) return;
     heartbeat(sh, s.api);
     if (s.api != WINDOW_VIEW_API_D3D11 && s.api != WINDOW_VIEW_API_D3D12) return;
     const ULONGLONG now = GetTickCount64();
     if (sh->app_heartbeat_ms == 0 || now - sh->app_heartbeat_ms > kAppAliveMs) return;   // the app is gone: show nothing
-    if (s.view_space == XR_NULL_HANDLE) {
-        if (g_next_create_reference_space == nullptr) return;
-        XrReferenceSpaceCreateInfo ci{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-        ci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-        ci.poseInReferenceSpace.orientation.w = 1.0f;
-        const XrResult r = g_next_create_reference_space(xs, &ci, &s.view_space);
-        if (XR_FAILED(r)) { note_error(r); s.view_space = XR_NULL_HANDLE; return; }
-    }
+    if (!ensure_space(xs, XR_REFERENCE_SPACE_TYPE_VIEW, s.view_space)) return;
     const float distance = sh->distance > 0.01f ? sh->distance : kDefaultDistance;
+    // the room mode: until the anchor is known (the first tracked frame) the windows stay head-locked
+    bool room = sh->room_mode != 0 && ensure_space(xs, XR_REFERENCE_SPACE_TYPE_LOCAL, s.local_space);
+    if (room) update_anchor(s, sh, when);
+    if (!room) s.anchor_ok = false;   // switched off: the next switch-on takes a fresh anchor
+    room = room && s.anchor_ok;
     for (int i = 0; i < WINDOW_VIEW_SLOTS; ++i) {
         WindowViewSlot& sl = sh->slots[i];
         Quad& q = s.quads[i];
@@ -331,13 +384,27 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         if (q.shown_frame < 0) continue;   // never uploaded: an empty swapchain would show rubbish
         XrCompositionLayerQuad l{XR_TYPE_COMPOSITION_LAYER_QUAD};
         l.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-        l.space = s.view_space;
+        l.space = room ? s.local_space : s.view_space;
         l.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
         l.subImage.swapchain = q.swapchain;
         l.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(q.width), static_cast<int32_t>(q.height)}};
         l.subImage.imageArrayIndex = 0;
-        l.pose.orientation = {0, 0, 0, 1};
-        l.pose.position = {sl.x, sl.y, -distance};
+        // on the desk the window's centre is (x, y) at `distance`; pushed back by `depth` along the same line of sight, so it
+        // keeps its place in the view and shrinks with the distance (its size in metres stays the same)
+        const float depth = sl.depth > 0.05f ? sl.depth : 1.0f;
+        const XrVector3f p{sl.x * depth, sl.y * depth, -distance * depth};
+        if (!room) {
+            l.pose.orientation = {0, 0, 0, 1};
+            l.pose.position = p;
+        } else {
+            // facing the anchor, upright: turn +Z (the quad's front) towards it, first tipped about X, then about Y
+            const float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+            const XrVector3f n{-p.x / len, -p.y / len, -p.z / len};
+            const XrQuaternionf face = q_mul(q_axis(0, 1, 0, std::atan2(n.x, n.z)), q_axis(1, 0, 0, -std::asin(n.y)));
+            const XrVector3f off = q_rot(s.anchor_rot, p);
+            l.pose.position = {s.anchor_pos.x + off.x, s.anchor_pos.y + off.y, s.anchor_pos.z + off.z};
+            l.pose.orientation = q_mul(s.anchor_rot, face);
+        }
         l.size = {static_cast<float>(q.width) * sl.scale, static_cast<float>(q.height) * sl.scale};
         out.push_back(l);
     }
@@ -407,7 +474,7 @@ XRAPI_ATTR XrResult XRAPI_CALL wv_xrEndFrame(XrSession session, const XrFrameEnd
     if (info != nullptr) {
         std::lock_guard _{g_mtx};
         auto it = g_sessions.find(session);
-        if (it != g_sessions.end()) build_quads(it->second, session, quads);
+        if (it != g_sessions.end()) build_quads(it->second, session, quads, info->displayTime);
     }
     if (quads.empty()) return g_next_end_frame(session, info);
     std::vector<const XrCompositionLayerBaseHeader*> layers(info->layers, info->layers + info->layerCount);
@@ -443,6 +510,7 @@ void fetch_next(XrInstance instance) {
     get("xrDestroySession", g_next_destroy_session);
     get("xrEndFrame", g_next_end_frame);
     get("xrCreateReferenceSpace", g_next_create_reference_space);
+    get("xrLocateSpace", g_next_locate_space);
     get("xrCreateSwapchain", g_next_create_swapchain);
     get("xrDestroySwapchain", g_next_destroy_swapchain);
     get("xrEnumerateSwapchainFormats", g_next_enum_formats);

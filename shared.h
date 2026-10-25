@@ -12,16 +12,16 @@
 #include <windows.h>
 #include <cstdint>
 
-#define WINDOW_VIEW_MAPPING_NAME L"Local\\FlatToVR_WindowView_v1"
-#define WINDOW_VIEW_SLOT_MAPPING_FMT L"Local\\FlatToVR_WindowView_v1_slot%u"   // %u = slot index
+#define WINDOW_VIEW_MAPPING_NAME L"Local\\FlatToVR_WindowView_v2"   // v2 (1.4): the room mode and per-window depth
+#define WINDOW_VIEW_SLOT_MAPPING_FMT L"Local\\FlatToVR_WindowView_v2_slot%u"   // %u = slot index
 #define WINDOW_VIEW_MAGIC 0x57564956u   // "VIVW"
-#define WINDOW_VIEW_VERSION 1u
+#define WINDOW_VIEW_VERSION 2u
 #define WINDOW_VIEW_SLOTS 8
 #define WINDOW_VIEW_MAX_W 2560
 #define WINDOW_VIEW_MAX_H 1600
 #define WINDOW_VIEW_SLOT_BYTES (WINDOW_VIEW_MAX_W * WINDOW_VIEW_MAX_H * 4)   // one pixel buffer
 #define WINDOW_VIEW_SLOT_MAPPING_BYTES (2 * WINDOW_VIEW_SLOT_BYTES)        // both buffers of one slot
-#define WINDOW_VIEW_HEADER_SIZE 500     // bytes; the app maps exactly this much (WindowView.cs SIZE)
+#define WINDOW_VIEW_HEADER_SIZE 512     // bytes; the app maps exactly this much (WindowView.cs SIZE)
 
 // which graphics API the game binds (header `api`)
 #define WINDOW_VIEW_API_NONE 0
@@ -40,7 +40,7 @@ struct WindowViewSlot {              // 40 bytes, at header offset 180 + 40 * sl
     volatile LONG frame;             // +24  app: +1 after every finished buffer
     volatile LONG buffer;            // +28  app: which buffer (0 or 1) holds `frame`
     volatile LONG shown_frame;       // +32  layer: the last frame it uploaded into the game
-    LONG reserved;                   // +36
+    float depth;                     // +36  app: how far back the window sits, as a share of `distance` (0 = 1.0); it shrinks with it
 };
 struct WindowViewShared {
     uint32_t magic;                  //   0
@@ -56,7 +56,10 @@ struct WindowViewShared {
     volatile LONG uploads;           // 172  layer: pictures copied into the game
     volatile LONG last_error;        // 176  layer: the last failing result (XrResult or HRESULT as a LONG), 0 = none
     WindowViewSlot slots[WINDOW_VIEW_SLOTS];   // 180
-};                                   // 500 bytes
+    volatile LONG room_mode;         // 500  app: 1 = the windows stay in the room (LOCAL space, around an anchor), 0 = they follow the head
+    volatile LONG recenter_seq;      // 504  app: +1 = put the anchor where the head looks now (level, at the head's height)
+    volatile LONG anchor_seq_seen;   // 508  layer: the recenter_seq its anchor was set from
+};                                   // 512 bytes
 #pragma pack(pop)
 static_assert(sizeof(WindowViewSlot) == 40, "the app reads this layout by offset");
 static_assert(sizeof(WindowViewShared) == WINDOW_VIEW_HEADER_SIZE, "the app reads this layout by offset");

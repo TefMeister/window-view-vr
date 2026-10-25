@@ -18,6 +18,7 @@ class InputRouter : IDisposable {
     public bool On { get; private set; }
     public static bool AcceptInjected;      // tests only (WindowView.cs --test-input)
     public event Action<bool> OnChanged;    // raised on the hook thread
+    public event Action OnRecenter;         // 1.4: F11, raised on the hook thread
     readonly Desk desk;
     Thread thread;
     uint threadId;
@@ -50,6 +51,7 @@ class InputRouter : IDisposable {
                WM_MBUTTONDOWN = 0x207, WM_MBUTTONUP = 0x208, WM_MOUSEWHEEL = 0x20A, WM_MOUSEHWHEEL = 0x20E;
     const int MK_LBUTTON = 1, MK_RBUTTON = 2, MK_SHIFT = 4, MK_CONTROL = 8, MK_MBUTTON = 0x10;
     const uint VK_PRIOR = 0x21, VK_NEXT = 0x22, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_CAPITAL = 0x14;
+    const uint VK_F9 = 0x78, VK_F10 = 0x79, VK_F11 = 0x7A;
     const uint LLKHF_INJECTED = 0x10, LLMHF_INJECTED = 0x01, LLKHF_EXTENDED = 0x01;
     const uint CWP_SKIP = 0x1 | 0x2 | 0x4;   // invisible, disabled, transparent children
     static readonly IntPtr SWALLOW = new IntPtr(1);
@@ -109,6 +111,20 @@ class InputRouter : IDisposable {
         if ((k.flags & LLKHF_INJECTED) == 0 || AcceptInjected) {
             if (k.vkCode == VK_PRIOR) { if (down) SetOn(true); return SWALLOW; }
             if (k.vkCode == VK_NEXT) { if (down) SetOn(false); return SWALLOW; }
+            // 1.4, while the mouse and keyboard go to the windows: F9 pushes the window under the cursor back, F10 pulls it in,
+            // F11 brings every window back in front of the eyes (the room mode's anchor goes where the head looks)
+            if (On && (k.vkCode == VK_F9 || k.vkCode == VK_F10)) {
+                if (down) {
+                    Placement p;
+                    lock (desk.Lock) { p = desk.Push(k.vkCode == VK_F9 ? 1 : -1); if (p != null) desk.Save(); }
+                    LastAction = p == null ? "no window to push" : (k.vkCode == VK_F9 ? "pushed back: " : "pulled in: ") + p.Title + string.Format(System.Globalization.CultureInfo.InvariantCulture, " (x{0:0.00})", p.Depth);
+                }
+                return SWALLOW;
+            }
+            if (On && k.vkCode == VK_F11) {
+                if (down) { var h = OnRecenter; if (h != null) h(); LastAction = "windows brought back in front of you"; }
+                return SWALLOW;
+            }
             if (On) { ForwardKey(k, down, msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP); return SWALLOW; }
         }
         return CallNextHookEx(kbHook, code, wParam, lParam);
@@ -198,9 +214,9 @@ class InputRouter : IDisposable {
                 float width = desk.CursorX - sizing.Left;
                 if (sizing.PicW > 0 && width > 0.02f) {
                     float left = sizing.Left, top = sizing.Top;
-                    sizing.Scale = Math.Max(Desk.MIN_SCALE, Math.Min(Desk.MAX_SCALE, width / sizing.PicW));
-                    sizing.X = left + sizing.PicW * sizing.Scale / 2;   // keep the top-left corner where it was
-                    sizing.Y = top - sizing.PicH * sizing.Scale / 2;
+                    sizing.Scale = Math.Max(Desk.MIN_SCALE, Math.Min(Desk.MAX_SCALE, width * sizing.Depth / sizing.PicW));   // 1.4: as seen
+                    sizing.X = left + sizing.PicW * sizing.Seen / 2;   // keep the top-left corner where it was
+                    sizing.Y = top - sizing.PicH * sizing.Seen / 2;
                 }
                 return;
             }
@@ -225,8 +241,8 @@ class InputRouter : IDisposable {
     Placement heldPlacement;
     Placement HeldPlacement() { return heldPlacement != null && heldPlacement.Live ? heldPlacement : null; }
     // while a button is held and the cursor has left the window, keep reporting a point just outside it (sliders expect that)
-    int HeldClientX(Placement p) { return (int)Math.Floor((desk.CursorX - p.Left) / p.Scale); }
-    int HeldClientY(Placement p) { return (int)Math.Floor((p.Top - desk.CursorY) / p.Scale) - Capture.HEADER; }
+    int HeldClientX(Placement p) { return (int)Math.Floor((desk.CursorX - p.Left) / p.Seen); }
+    int HeldClientY(Placement p) { return (int)Math.Floor((p.Top - desk.CursorY) / p.Seen) - Capture.HEADER; }
 
     void Button(uint msg) {
         bool down = msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN;
