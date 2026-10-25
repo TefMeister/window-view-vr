@@ -324,9 +324,25 @@ class FancySlider : Control {
         base.OnMouseCaptureChanged(e);
         if (dragging && !Capture) { dragging = false; Invalidate(); if (Released != null) Released(); }
     }
+    // 2026-10-25: the wheel moved any slider it passed over while a long window was being scrolled, and Window View's right stick
+    // scrolls with the wheel, so scrolling through Grab Zones in the headset changed values on the way. The wheel now moves a slider
+    // only once it has been clicked (it has the focus); otherwise it scrolls the list the slider sits in.
     protected override void OnMouseWheel(MouseEventArgs e) {
+        if (!Focused || !Enabled) {
+            for (Control c = Parent; c != null; c = c.Parent) {
+                var sc = c as ScrollableControl;
+                if (sc != null && sc.AutoScroll && sc.VerticalScroll.Visible) {
+                    var pos = sc.AutoScrollPosition;
+                    sc.AutoScrollPosition = new Point(-pos.X, Math.Max(0, -pos.Y - Math.Sign(e.Delta) * 3 * 40));
+                    sc.Invalidate(true);
+                    break;
+                }
+            }
+            var h = e as HandledMouseEventArgs;
+            if (h != null) h.Handled = true;
+            return;
+        }
         base.OnMouseWheel(e);
-        if (!Enabled) return;
         if (Pressed != null) Pressed();
         UserSet(val + Math.Sign(e.Delta) * SmallChange);
         if (Released != null) Released();
