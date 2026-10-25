@@ -45,10 +45,14 @@ class Desk {
     public float CursorX, CursorY;
     static readonly string File = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowViewVR", "layout.txt");
 
+    // 1.5: where windows overlap, the one the layer draws on top wins: the nearer (it paints farthest first), at the same
+    // distance the later slot; so the mouse and the controllers always take the window that is seen
     public Hit HitTest(float cx, float cy) {
         var hit = new Hit();
-        for (int i = Windows.Count - 1; i >= 0; --i) {
-            var p = Windows[i];
+        var order = new List<Placement>(Windows);
+        order.Sort((a, b) => a.Depth != b.Depth ? a.Depth.CompareTo(b.Depth) : b.Slot.CompareTo(a.Slot));
+        for (int i = 0; i < order.Count; ++i) {
+            var p = order[i];
             if (!p.Shown || !p.Live || p.PicW == 0) continue;
             int px = (int)Math.Floor((cx - p.Left) / p.Seen), py = (int)Math.Floor((p.Top - cy) / p.Seen);
             if (px < 0 || py < 0 || px >= p.PicW || py >= p.PicH) continue;

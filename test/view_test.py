@@ -8,6 +8,8 @@ LOOKS like is checked by eye with the simulator's screenshot (the MCP capture_sc
 
     python view_test.py [d3d11|d3d12|both] [--runtime <runtime json>] [--seconds 6] [--resize] [--room]
 --room (1.4): the room mode on; also PASS only when the layer set its anchor in the room.
+--actions (1.5): the stand-in game uses controllers; also PASS only when the game's own actions all worked and the layer's
+controller actions were attached beside them. --ctrl: CONTROL mode on from the start (the game's hands held).
 Exit 0 = every requested API passed.
 """
 import argparse
@@ -42,8 +44,10 @@ def run_one(api, args, env):
         fake.append("--resize")
     if args.room:
         fake += ["--room", "--depth", "1.5"]
+    if args.ctrl:
+        fake.append("--ctrl")
     fw = subprocess.Popen(fake, stdout=subprocess.PIPE, text=True)
-    game = subprocess.run([args.app, args.loader, api, str(args.seconds)], env=env, capture_output=True, text=True)
+    game = subprocess.run([args.app, args.loader, api, str(args.seconds)] + (["actions"] if args.actions else []), env=env, capture_output=True, text=True)
     report = fw.communicate()[0].strip()
     print(game.stdout.strip())
     print(report)
@@ -59,6 +63,10 @@ def run_one(api, args, env):
     }
     if args.room:
         checks["room mode on and the anchor set in the room"] = int(got.get("room", 0)) == 1 and int(got.get("anchor_set", 0)) == 1
+    if args.actions:
+        acts = next((l for l in game.stdout.splitlines() if l.startswith("ACTIONS:")), "ACTIONS: none")
+        checks["the game's own controller actions all worked"] = acts.startswith("ACTIONS: ok") and " syncs=0" not in acts
+        checks["the layer's controller actions attached beside them"] = int(got.get("pointer_ready", 0)) == 1
     for name, ok in checks.items():
         print(("  ok   " if ok else "  FAIL ") + name)
     return all(checks.values())
@@ -74,6 +82,8 @@ def main():
     ap.add_argument("--seconds", type=float, default=6.0)
     ap.add_argument("--resize", action="store_true")
     ap.add_argument("--room", action="store_true")
+    ap.add_argument("--actions", action="store_true")
+    ap.add_argument("--ctrl", action="store_true")
     args = ap.parse_args()
     if not args.loader:
         sys.exit("no openxr_loader.dll found; pass --loader")

@@ -1,7 +1,10 @@
-// Capture.cs -- one window's picture for the headset: PrintWindow of the whole window into a bitmap we own, its client
-// area copied under our header strip (the drag handle), a resize grip in the corner, the desk cursor on top when it is
-// over this window, and the opacity baked into every pixel's alpha. Pixels come out BGRA, top-down, tightly packed,
+// Capture.cs -- one window's picture for the headset: the window's client area under our header strip (the drag handle), a
+// resize grip in the corner, and the opacity baked into every pixel's alpha. Pixels come out BGRA, top-down, tightly packed,
 // which is what the layer expects (shared.h).
+// 1.5: the client area comes from Windows Graphics Capture (window_view_capture.dll), which copies the picture the desktop
+// already has instead of making the window draw itself again (PrintWindow cost 29-40 ms a picture for the slider apps, so
+// sliders trailed behind in the headset: Tefa, "the sliders to somehow move smoothly not trail behind"); PrintWindow stays as
+// the fall-back when the capture cannot start. The desk cursor is drawn by the layer now (Pointer.cs).
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -10,6 +13,20 @@ using System.Runtime.InteropServices;
 
 [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
 [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; public POINT(int x, int y) { X = x; Y = y; } }
+
+static class Wgc {
+    [DllImport("window_view_capture.dll", CallingConvention = CallingConvention.Cdecl)] public static extern int wvc_supported();
+    [DllImport("window_view_capture.dll", CallingConvention = CallingConvention.Cdecl)] public static extern IntPtr wvc_open(IntPtr hwnd);
+    [DllImport("window_view_capture.dll", CallingConvention = CallingConvention.Cdecl)] public static extern int wvc_grab(IntPtr c, IntPtr outBuf, int maxBytes, out int w, out int h);
+    [DllImport("window_view_capture.dll", CallingConvention = CallingConvention.Cdecl)] public static extern void wvc_close(IntPtr c);
+    static int ok = -1;
+    public static bool Available {
+        get {
+            if (ok < 0) { try { ok = wvc_supported() == 1 ? 1 : 0; } catch (Exception) { ok = 0; } }   // DLL missing or Windows too old: PrintWindow
+            return ok == 1;
+        }
+    }
+}
 
 static class Native {
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
@@ -83,9 +100,49 @@ class Capture : IDisposable {
     readonly Dib full = new Dib(), pic = new Dib();
     public byte[] Pixels = new byte[0];
     public int Width, Height, ClientW, ClientH;
+    // 1.5: Graphics Capture state
+    IntPtr wgc = IntPtr.Zero, wgcHwnd = IntPtr.Zero;
+    IntPtr client = IntPtr.Zero;                 // the newest client-area picture (BGRA), unmanaged, MAX_W x MAX_H at most
+    int clientW, clientH;
+    bool haveClient;
+    float lastOpacity = -1;
+    string lastTitle;
+    const int CLIENT_BYTES = Shared.MAX_W * Shared.MAX_H * 4;
 
     // false = nothing new (the window is minimised, gone, or could not be drawn); the last picture should stay up
     public bool Grab(IntPtr hwnd, string title, float opacity, Point? cursor, bool outside) {
+        if (!Native.IsWindow(hwnd) || Native.IsIconic(hwnd)) return false;
+        if (Wgc.Available) {
+            if (wgc != IntPtr.Zero && wgcHwnd != hwnd) { Wgc.wvc_close(wgc); wgc = IntPtr.Zero; haveClient = false; }
+            if (wgc == IntPtr.Zero) { wgc = Wgc.wvc_open(hwnd); wgcHwnd = hwnd; }
+            if (wgc != IntPtr.Zero) {
+                if (client == IntPtr.Zero) client = Marshal.AllocHGlobal(CLIENT_BYTES);
+                int w, h;
+                int r = Wgc.wvc_grab(wgc, client, CLIENT_BYTES, out w, out h);
+                if (r == 1) { clientW = w; clientH = h; haveClient = true; }
+                else if (r < 0) { Wgc.wvc_close(wgc); wgc = IntPtr.Zero; haveClient = false; }
+                if (wgc != IntPtr.Zero) {
+                    if (!haveClient || (r != 1 && opacity == lastOpacity && title == lastTitle)) return false;   // nothing changed
+                    return Compose(title, opacity);
+                }
+            }
+        }
+        return GrabPrintWindow(hwnd, title, opacity, cursor, outside);
+    }
+
+    // the Graphics Capture picture under the header strip
+    bool Compose(string title, float opacity) {
+        int cw = Math.Min(clientW, Shared.MAX_W), ch = Math.Min(clientH, Shared.MAX_H - HEADER);
+        int w = cw, h = ch + HEADER;
+        if (!pic.Ensure(w, h)) return false;
+        unsafe {
+            byte* src = (byte*)client, dst = (byte*)pic.Bits + HEADER * w * 4;
+            for (int y = 0; y < ch; ++y) Buffer.MemoryCopy(src + (long)y * clientW * 4, dst + (long)y * w * 4, (long)w * 4, (long)cw * 4);
+        }
+        return Finish(w, h, cw, ch, title, opacity, null, false);
+    }
+
+    bool GrabPrintWindow(IntPtr hwnd, string title, float opacity, Point? cursor, bool outside) {
         RECT wr, cr;
         if (!Native.IsWindow(hwnd) || Native.IsIconic(hwnd) || !Native.GetWindowRect(hwnd, out wr) || !Native.GetClientRect(hwnd, out cr)) return false;
         int fw = wr.Right - wr.Left, fh = wr.Bottom - wr.Top, cw = cr.Right, ch = cr.Bottom;
@@ -99,6 +156,13 @@ class Capture : IDisposable {
         int w = cw, h = ch + HEADER;
         if (!pic.Ensure(w, h)) return false;
         Native.BitBlt(pic.Dc, 0, HEADER, cw, ch, full.Dc, ox, oy, Native.SRCCOPY);
+        return Finish(w, h, cw, ch, title, opacity, cursor, outside);
+    }
+
+    // the header strip, the grip, (the old in-picture cursor), the opacity, and out into Pixels
+    bool Finish(int w, int h, int cw, int ch, string title, float opacity, Point? cursor, bool outside) {
+        lastOpacity = opacity;
+        lastTitle = title;
         using (var bmp = new Bitmap(w, h, w * 4, PixelFormat.Format32bppArgb, pic.Bits))
         using (var g = Graphics.FromImage(bmp)) {
             g.FillRectangle(HeaderBrush, 0, 0, w, HEADER);
@@ -128,5 +192,9 @@ class Capture : IDisposable {
         ClientH = ch;
         return true;
     }
-    public void Dispose() { full.Dispose(); pic.Dispose(); }
+    public void Dispose() {
+        if (wgc != IntPtr.Zero) { Wgc.wvc_close(wgc); wgc = IntPtr.Zero; }
+        if (client != IntPtr.Zero) { Marshal.FreeHGlobal(client); client = IntPtr.Zero; }
+        full.Dispose(); pic.Dispose();
+    }
 }

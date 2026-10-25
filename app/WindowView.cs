@@ -48,10 +48,13 @@ class Shared : IDisposable {
     // v2 (1.4): the room mode and per-window depth (shared.h); new names, so an old layer and a new app never mix
     const string NAME = @"Local\FlatToVR_WindowView_v2", SLOT_NAME = @"Local\FlatToVR_WindowView_v2_slot{0}";
     const uint MAGIC = 0x57564956, VERSION = 2;
-    public const int SIZE = 512, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
+    public const int SIZE = 628, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
     public const long SLOT_BYTES = MAX_W * MAX_H * 4L;
     const int APP_HEARTBEAT = 8, LAYER_HEARTBEAT = 16, LAYER_PID = 24, API = 28, GAME_NAME = 36, DISTANCE = 164,
-              QUADS = 168, UPLOADS = 172, LAST_ERROR = 176, SLOTS_OFF = 180, SLOT = 40, ROOM_MODE = 500, RECENTER_SEQ = 504, ANCHOR_SEEN = 508;
+              QUADS = 168, UPLOADS = 172, LAST_ERROR = 176, SLOTS_OFF = 180, SLOT = 40, ROOM_MODE = 500, RECENTER_SEQ = 504, ANCHOR_SEEN = 508,
+              CURSOR_VISIBLE = 512, CURSOR_SLOT = 516, CURSOR_P = 520, CURSOR_EDGE = 532, CTRL_MODE = 536, POINTER_READY = 540,
+              RAY_VALID = 544, RAY_O = 548, RAY_D = 560, TRIGGER = 572, SQUEEZE = 576, STICK_Y = 580, BUTTONS = 584, RAY_SEQ = 588,
+              LRAY_VALID = 592, LRAY_O = 596, LRAY_D = 608, LSQUEEZE = 620, LSTICK_Y = 624;
     const int S_VISIBLE = 0, S_WIDTH = 4, S_HEIGHT = 8, S_X = 12, S_Y = 16, S_SCALE = 20, S_FRAME = 24, S_BUFFER = 28, S_SHOWN = 32, S_DEPTH = 36;
     const ulong CONNECTED_WITHIN_MS = 3000;   // a game counts as connected if the layer was heard from this recently
     readonly MemoryMappedFile file;
@@ -82,6 +85,29 @@ class Shared : IDisposable {
     // put the anchor where the head looks now; AnchorSet says the layer has done it
     public void Recenter() { view.Write(RECENTER_SEQ, view.ReadInt32(RECENTER_SEQ) + 1); }
     public bool AnchorSet { get { return view.ReadInt32(ANCHOR_SEEN) == view.ReadInt32(RECENTER_SEQ); } }
+    // 1.5: the pointer the layer draws every frame, and the controllers working the windows (Pointer.cs)
+    public void WriteCursor(bool visible, int slot, V3 tip, bool edge) {
+        view.Write(CURSOR_SLOT, slot);
+        view.Write(CURSOR_P, tip.X); view.Write(CURSOR_P + 4, tip.Y); view.Write(CURSOR_P + 8, tip.Z);
+        view.Write(CURSOR_EDGE, edge ? 1 : 0);
+        view.Write(CURSOR_VISIBLE, visible ? 1 : 0);
+    }
+    public bool CtrlMode { get { return view.ReadInt32(CTRL_MODE) != 0; } set { view.Write(CTRL_MODE, value ? 1 : 0); } }
+    public int PointerReady { get { return view.ReadInt32(POINTER_READY); } }   // 1 = the controllers can work the windows in this game
+    public bool ReadRay(out V3 o, out V3 d, out float trigger, out float squeeze, out float stickY, out int buttons, out int seq) {
+        seq = view.ReadInt32(RAY_SEQ);
+        o = new V3(view.ReadSingle(RAY_O), view.ReadSingle(RAY_O + 4), view.ReadSingle(RAY_O + 8));
+        d = new V3(view.ReadSingle(RAY_D), view.ReadSingle(RAY_D + 4), view.ReadSingle(RAY_D + 8));
+        trigger = view.ReadSingle(TRIGGER); squeeze = view.ReadSingle(SQUEEZE); stickY = view.ReadSingle(STICK_Y);
+        buttons = view.ReadInt32(BUTTONS);
+        return view.ReadInt32(RAY_VALID) != 0;
+    }
+    public bool ReadLeftRay(out V3 o, out V3 d, out float squeeze, out float stickY) {
+        o = new V3(view.ReadSingle(LRAY_O), view.ReadSingle(LRAY_O + 4), view.ReadSingle(LRAY_O + 8));
+        d = new V3(view.ReadSingle(LRAY_D), view.ReadSingle(LRAY_D + 4), view.ReadSingle(LRAY_D + 8));
+        squeeze = view.ReadSingle(LSQUEEZE); stickY = view.ReadSingle(LSTICK_Y);
+        return view.ReadInt32(LRAY_VALID) != 0;
+    }
     public string GameName {
         get {
             var chars = new char[64];

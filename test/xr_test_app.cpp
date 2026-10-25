@@ -3,6 +3,9 @@
 //
 //   xr_test_app.exe <openxr_loader.dll> d3d11|d3d12 [seconds=5]
 // Prints "API: ..." and "FRAMES: n" (frames ended). Exit 0 when at least one frame was ended.
+// 1.5: a 5th argument "actions" gives it controllers like a real game (an action set with a trigger, a grip and a hand pose,
+// Touch bindings, synced every frame, the hand located every frame) and prints "ACTIONS: ok syncs=N states=N poses=N" or
+// "ACTIONS: FAIL <step> <code>", so a layer that adds its own controller actions can be checked to leave the game's whole.
 #define XR_NO_PROTOTYPES
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -113,6 +116,63 @@ int main(int argc, char** argv) {
     rci.poseInReferenceSpace.orientation.w = 1.0f;
     XrSpace space = XR_NULL_HANDLE;
     XR(fn<PFN_xrCreateReferenceSpace>(inst, "xrCreateReferenceSpace")(session, &rci, &space));
+
+    // 1.5: controllers, when asked for
+    const bool actions = argc > 4 && _stricmp(argv[4], "actions") == 0;
+    XrActionSet aset = XR_NULL_HANDLE;
+    XrAction a_trigger = XR_NULL_HANDLE, a_grip = XR_NULL_HANDLE, a_hand = XR_NULL_HANDLE;
+    XrSpace hand_space = XR_NULL_HANDLE;
+    const char* act_fail = nullptr;
+    XrResult act_code = XR_SUCCESS;
+    int syncs = 0, states = 0, poses = 0;
+    if (actions) {
+        auto to_path = [&](const char* s) { XrPath p = XR_NULL_PATH; fn<PFN_xrStringToPath>(inst, "xrStringToPath")(inst, s, &p); return p; };
+        XrActionSetCreateInfo si{XR_TYPE_ACTION_SET_CREATE_INFO};
+        strcpy_s(si.actionSetName, "game");
+        strcpy_s(si.localizedActionSetName, "Game");
+        act_code = fn<PFN_xrCreateActionSet>(inst, "xrCreateActionSet")(inst, &si, &aset);
+        if (XR_FAILED(act_code)) act_fail = "create set";
+        auto make = [&](const char* name, XrActionType type, XrAction& out) {
+            if (act_fail) return;
+            XrActionCreateInfo ai{XR_TYPE_ACTION_CREATE_INFO};
+            strcpy_s(ai.actionName, name);
+            strcpy_s(ai.localizedActionName, name);
+            ai.actionType = type;
+            act_code = fn<PFN_xrCreateAction>(inst, "xrCreateAction")(aset, &ai, &out);
+            if (XR_FAILED(act_code)) act_fail = "create action";
+        };
+        make("fire", XR_ACTION_TYPE_FLOAT_INPUT, a_trigger);
+        make("grab", XR_ACTION_TYPE_FLOAT_INPUT, a_grip);
+        make("hand", XR_ACTION_TYPE_POSE_INPUT, a_hand);
+        if (!act_fail) {
+            XrActionSuggestedBinding b[] = {{a_trigger, to_path("/user/hand/right/input/trigger/value")},
+                                            {a_grip, to_path("/user/hand/left/input/squeeze/value")},
+                                            {a_hand, to_path("/user/hand/right/input/grip/pose")}};
+            XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+            sb.interactionProfile = to_path("/interaction_profiles/oculus/touch_controller");
+            sb.countSuggestedBindings = 3;
+            sb.suggestedBindings = b;
+            act_code = fn<PFN_xrSuggestInteractionProfileBindings>(inst, "xrSuggestInteractionProfileBindings")(inst, &sb);
+            if (XR_FAILED(act_code)) act_fail = "suggest";
+        }
+        if (!act_fail) {
+            XrSessionActionSetsAttachInfo at{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+            at.countActionSets = 1;
+            at.actionSets = &aset;
+            act_code = fn<PFN_xrAttachSessionActionSets>(inst, "xrAttachSessionActionSets")(session, &at);
+            if (XR_FAILED(act_code)) act_fail = "attach";
+        }
+        if (!act_fail) {
+            XrActionSpaceCreateInfo sc{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+            sc.action = a_hand;
+            sc.poseInActionSpace.orientation.w = 1.0f;
+            act_code = fn<PFN_xrCreateActionSpace>(inst, "xrCreateActionSpace")(session, &sc, &hand_space);
+            if (XR_FAILED(act_code)) act_fail = "action space";
+        }
+    }
+    auto sync_actions = fn<PFN_xrSyncActions>(inst, "xrSyncActions");
+    auto state_float = fn<PFN_xrGetActionStateFloat>(inst, "xrGetActionStateFloat");
+    auto locate_space = fn<PFN_xrLocateSpace>(inst, "xrLocateSpace");
 
     const XrViewConfigurationType stereo = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     auto enum_views = fn<PFN_xrEnumerateViewConfigurationViews>(inst, "xrEnumerateViewConfigurationViews");
@@ -272,6 +332,22 @@ int main(int argc, char** argv) {
             layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&proj);
             nlayers = 1;
         }
+        if (actions && !act_fail) {   // like a game: sync, read the trigger, find the hand
+            XrActiveActionSet active{aset, XR_NULL_PATH};
+            XrActionsSyncInfo sy{XR_TYPE_ACTIONS_SYNC_INFO};
+            sy.countActiveActionSets = 1;
+            sy.activeActionSets = &active;
+            XrResult r = sync_actions(session, &sy);
+            if (XR_FAILED(r)) { act_fail = "sync"; act_code = r; } else ++syncs;
+            XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+            gi.action = a_trigger;
+            XrActionStateFloat st{XR_TYPE_ACTION_STATE_FLOAT};
+            r = state_float(session, &gi, &st);
+            if (XR_FAILED(r)) { act_fail = "state"; act_code = r; } else ++states;
+            XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+            r = locate_space(hand_space, space, fs.predictedDisplayTime, &loc);
+            if (XR_FAILED(r)) { act_fail = "locate"; act_code = r; } else ++poses;
+        }
         XrFrameEndInfo fei{XR_TYPE_FRAME_END_INFO};
         fei.displayTime = fs.predictedDisplayTime;
         fei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
@@ -281,6 +357,10 @@ int main(int argc, char** argv) {
         ++frames;
     }
     printf("API: %s\nFRAMES: %d\n", d12 ? "D3D12" : "D3D11", frames);
+    if (actions) {
+        if (act_fail) printf("ACTIONS: FAIL %s %d\n", act_fail, static_cast<int>(act_code));
+        else printf("ACTIONS: ok syncs=%d states=%d poses=%d\n", syncs, states, poses);
+    }
     fflush(stdout);
     fn<PFN_xrDestroySession>(inst, "xrDestroySession")(session);
     fn<PFN_xrDestroyInstance>(inst, "xrDestroyInstance")(inst);

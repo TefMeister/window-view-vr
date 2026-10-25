@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SIM_RUNTIME = r"D:\claude video game stuff\tools\OpenXR-Simulator\openxr_simulator.json"
 LAYER_NAME = "XR_APILAYER_FLATTOVR_window_view"
-NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v2", 512, 180
+NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v2", 628, 180
 u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
 VK_PRIOR, VK_NEXT = 0x21, 0x22
 

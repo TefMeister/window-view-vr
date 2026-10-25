@@ -28,6 +28,7 @@
 #include <openxr/openxr_platform.h>
 #include <openxr/openxr_loader_negotiation.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -84,6 +85,13 @@ struct Session {
     LONG anchor_seq = -1;
     XrVector3f anchor_pos{0, 0, 0};
     XrQuaternionf anchor_rot{0, 0, 0, 1};  // a turn about the vertical only
+    // 1.5
+    bool ours_attached = false;            // our controller action set is attached beside the game's
+    bool both_was = false;                 // the left stick was in last frame (the CONTROL switch fires once per press)
+    XrSpace aim_space = XR_NULL_HANDLE;    // the right controller's aim pose
+    XrSpace left_aim_space = XR_NULL_HANDLE;   // the left controller's (it carries windows too)
+    Quad cursor[2];                        // the pointer: white over a window, yellow between windows
+    XrQuaternionf slot_face[WINDOW_VIEW_SLOTS]{};   // each window's turn in the desk's frame, this frame
     Quad quads[WINDOW_VIEW_SLOTS];
     std::vector<uint8_t> staging;
 };
@@ -347,6 +355,70 @@ void update_anchor(Session& s, WindowViewShared* sh, XrTime when) {
     sh->anchor_seq_seen = want;
 }
 
+#include "controllers.inl"
+
+// 1.5: the pointer, an arrow drawn once into a small swapchain of its own and placed every frame from the shared block,
+// so it moves at the headset's rate instead of with the window pictures (Tefa: "the mouse in VR right now is very laggy
+// and not smooth at all": it was drawn into the window pictures, about 30 a second at best)
+constexpr int kCursorPx = 32;
+constexpr float kCursorSize = 0.03f;   // metres per metre of distance: the arrow covers the same share of the view anywhere
+bool point_in_arrow(float x, float y) {
+    static const float px[] = {0, 0, 6, 10.5f, 14.5f, 10.5f, 18}, py[] = {0, 23, 18, 27, 25, 16.5f, 16.5f};
+    bool in = false;
+    for (int i = 0, j = 6; i < 7; j = i++)
+        if (((py[i] > y) != (py[j] > y)) && (x < (px[j] - px[i]) * (y - py[i]) / (py[j] - py[i]) + px[i])) in = !in;
+    return in;
+}
+bool ensure_cursor(Session& s, XrSession xs, int kind) {
+    Quad& q = s.cursor[kind];
+    if (!ensure_swapchain(s, xs, q, kCursorPx, kCursorPx)) return false;
+    if (q.shown_frame >= 0) return true;
+    s.staging.assign(kCursorPx * kCursorPx * 4, 0);
+    const uint8_t fill[3] = {static_cast<uint8_t>(kind ? 60 : 255), static_cast<uint8_t>(kind ? 210 : 255), 255};   // BGR: white / yellow
+    for (int y = 0; y < kCursorPx; ++y) {
+        for (int x = 0; x < kCursorPx; ++x) {
+            const float fx = x + 0.5f - 1.5f, fy = y + 0.5f - 1.5f;
+            const bool in = point_in_arrow(fx, fy);
+            bool edge = false;
+            for (int k = 0; k < 8 && !edge; ++k) {
+                const float a = k * 0.785398f;
+                if (point_in_arrow(fx + 1.8f * std::cos(a), fy + 1.8f * std::sin(a))) edge = !in;
+            }
+            if (!in && !edge) continue;
+            uint8_t* p = &s.staging[(static_cast<size_t>(y) * kCursorPx + x) * 4];
+            if (in) { p[0] = fill[0]; p[1] = fill[1]; p[2] = fill[2]; } else { p[0] = p[1] = p[2] = 0; }
+            p[3] = 255;
+            if (q.swap_rb) std::swap(p[0], p[2]);
+        }
+    }
+    if (!upload(s, q, s.staging.data())) return false;
+    q.shown_frame = 0;
+    return true;
+}
+void add_cursor(Session& s, XrSession xs, WindowViewShared* sh, bool room, std::vector<XrCompositionLayerQuad>& out) {
+    const LONG slot = sh->cursor_slot;
+    if (!sh->cursor_visible || slot < 0 || slot >= WINDOW_VIEW_SLOTS) return;
+    const int kind = sh->cursor_edge ? 1 : 0;
+    if (!ensure_cursor(s, xs, kind)) return;
+    const XrVector3f tip{sh->cursor_p[0], sh->cursor_p[1], sh->cursor_p[2]};
+    const float dist = std::sqrt(tip.x * tip.x + tip.y * tip.y + tip.z * tip.z);
+    const float size = kCursorSize * (dist > 0.05f ? dist : 1.0f);
+    const XrQuaternionf face = s.slot_face[slot];
+    const XrVector3f off = q_rot(face, {size * 0.5f, -size * 0.5f, 0});   // the arrow's tip is its top-left corner
+    XrVector3f p{tip.x + off.x, tip.y + off.y, tip.z + off.z};
+    XrQuaternionf o = face;
+    if (room) { const XrVector3f w = q_rot(s.anchor_rot, p); p = {s.anchor_pos.x + w.x, s.anchor_pos.y + w.y, s.anchor_pos.z + w.z}; o = q_mul(s.anchor_rot, face); }
+    XrCompositionLayerQuad l{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    l.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+    l.space = room ? s.local_space : s.view_space;
+    l.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    l.subImage.swapchain = s.cursor[kind].swapchain;
+    l.subImage.imageRect = {{0, 0}, {kCursorPx, kCursorPx}};
+    l.pose = {o, p};
+    l.size = {size, size};
+    out.push_back(l);   // last: on top of every window
+}
+
 // everything this frame: refresh changed pictures and list one quad per visible slot (the quads vector is reserved by
 // the caller so the pointers taken afterwards stay put)
 void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& out, XrTime when) {
@@ -393,6 +465,7 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         // keeps its place in the view and shrinks with the distance (its size in metres stays the same)
         const float depth = sl.depth > 0.05f ? sl.depth : 1.0f;
         const XrVector3f p{sl.x * depth, sl.y * depth, -distance * depth};
+        s.slot_face[i] = {0, 0, 0, 1};
         if (!room) {
             l.pose.orientation = {0, 0, 0, 1};
             l.pose.position = p;
@@ -401,6 +474,7 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
             const float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
             const XrVector3f n{-p.x / len, -p.y / len, -p.z / len};
             const XrQuaternionf face = q_mul(q_axis(0, 1, 0, std::atan2(n.x, n.z)), q_axis(1, 0, 0, -std::asin(n.y)));
+            s.slot_face[i] = face;
             const XrVector3f off = q_rot(s.anchor_rot, p);
             l.pose.position = {s.anchor_pos.x + off.x, s.anchor_pos.y + off.y, s.anchor_pos.z + off.z};
             l.pose.orientation = q_mul(s.anchor_rot, face);
@@ -408,11 +482,29 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         l.size = {static_cast<float>(q.width) * sl.scale, static_cast<float>(q.height) * sl.scale};
         out.push_back(l);
     }
+    // 1.5: farthest first, so a nearer window always covers a farther one (the compositor has no depth test: it paints the
+    // quads in the order given). The distance is from the eyes: in room mode where the head really is in the room this frame.
+    if (out.size() > 1) {
+        XrVector3f eye{0, 0, 0};
+        if (room && g_next_locate_space != nullptr) {
+            XrSpaceLocation hl{XR_TYPE_SPACE_LOCATION};
+            if (XR_SUCCEEDED(g_next_locate_space(s.view_space, s.local_space, when, &hl)) &&
+                (hl.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0) eye = hl.pose.position;
+        }
+        auto far2 = [&](const XrCompositionLayerQuad& q) {
+            const float dx = q.pose.position.x - eye.x, dy = q.pose.position.y - eye.y, dz = q.pose.position.z - eye.z;
+            return dx * dx + dy * dy + dz * dz;
+        };
+        std::stable_sort(out.begin(), out.end(), [&](const XrCompositionLayerQuad& a, const XrCompositionLayerQuad& b) { return far2(a) > far2(b); });
+    }
+    controller_frame(s, xs, sh, when, room);
+    add_cursor(s, xs, sh, room, out);
     if (!out.empty()) InterlockedIncrement(&sh->quads_submitted);
 }
 
 void destroy_session_state(Session& s) {
     for (auto& q : s.quads) destroy_quad(q);
+    for (auto& q : s.cursor) destroy_quad(q);
     release(s.ctx);
     release(s.d11);
     release(s.list);
@@ -493,6 +585,18 @@ XRAPI_ATTR XrResult XRAPI_CALL wv_xrGetInstanceProcAddr(XrInstance instance, con
         {"xrCreateSession", (PFN_xrVoidFunction)wv_xrCreateSession, (PFN_xrVoidFunction*)&g_next_create_session},
         {"xrDestroySession", (PFN_xrVoidFunction)wv_xrDestroySession, (PFN_xrVoidFunction*)&g_next_destroy_session},
         {"xrEndFrame", (PFN_xrVoidFunction)wv_xrEndFrame, (PFN_xrVoidFunction*)&g_next_end_frame},
+        // 1.5: the controllers (controllers.inl)
+        {"xrSuggestInteractionProfileBindings", (PFN_xrVoidFunction)wv_xrSuggestInteractionProfileBindings, (PFN_xrVoidFunction*)&g_next_suggest},
+        {"xrAttachSessionActionSets", (PFN_xrVoidFunction)wv_xrAttachSessionActionSets, (PFN_xrVoidFunction*)&g_next_attach},
+        {"xrSyncActions", (PFN_xrVoidFunction)wv_xrSyncActions, (PFN_xrVoidFunction*)&g_next_sync},
+        {"xrCreateActionSpace", (PFN_xrVoidFunction)wv_xrCreateActionSpace, (PFN_xrVoidFunction*)&g_next_create_action_space},
+        {"xrDestroySpace", (PFN_xrVoidFunction)wv_xrDestroySpace, (PFN_xrVoidFunction*)&g_next_destroy_space},
+        {"xrGetActionStateBoolean", (PFN_xrVoidFunction)wv_xrGetActionStateBoolean, (PFN_xrVoidFunction*)&g_next_state_bool},
+        {"xrGetActionStateFloat", (PFN_xrVoidFunction)wv_xrGetActionStateFloat, (PFN_xrVoidFunction*)&g_next_state_float},
+        {"xrGetActionStateVector2f", (PFN_xrVoidFunction)wv_xrGetActionStateVector2f, (PFN_xrVoidFunction*)&g_next_state_vec2},
+        {"xrLocateSpace", (PFN_xrVoidFunction)wv_xrLocateSpace, (PFN_xrVoidFunction*)&g_next_locate_space},
+        {"xrLocateSpaces", (PFN_xrVoidFunction)wv_xrLocateSpaces, (PFN_xrVoidFunction*)&g_next_locate_spaces},
+        {"xrLocateSpacesKHR", (PFN_xrVoidFunction)wv_xrLocateSpacesKHR, (PFN_xrVoidFunction*)&g_next_locate_spaces_khr},
     };
     for (const auto& h : hooks) {
         if (std::strcmp(name, h.name) == 0) { *h.next = *function; *function = h.ours; break; }
@@ -511,6 +615,20 @@ void fetch_next(XrInstance instance) {
     get("xrEndFrame", g_next_end_frame);
     get("xrCreateReferenceSpace", g_next_create_reference_space);
     get("xrLocateSpace", g_next_locate_space);
+    get("xrStringToPath", g_next_string_to_path);
+    get("xrPathToString", g_next_path_to_string);
+    get("xrCreateActionSet", g_next_create_action_set);
+    get("xrCreateAction", g_next_create_action);
+    get("xrSuggestInteractionProfileBindings", g_next_suggest);
+    get("xrAttachSessionActionSets", g_next_attach);
+    get("xrSyncActions", g_next_sync);
+    get("xrGetActionStateBoolean", g_next_state_bool);
+    get("xrGetActionStateFloat", g_next_state_float);
+    get("xrGetActionStateVector2f", g_next_state_vec2);
+    get("xrCreateActionSpace", g_next_create_action_space);
+    get("xrDestroySpace", g_next_destroy_space);
+    get("xrLocateSpaces", g_next_locate_spaces);
+    get("xrLocateSpacesKHR", g_next_locate_spaces_khr);
     get("xrCreateSwapchain", g_next_create_swapchain);
     get("xrDestroySwapchain", g_next_destroy_swapchain);
     get("xrEnumerateSwapchainFormats", g_next_enum_formats);

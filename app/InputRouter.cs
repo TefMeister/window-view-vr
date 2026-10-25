@@ -172,9 +172,9 @@ class InputRouter : IDisposable {
                 int dx = m.pt.X - centre.X, dy = m.pt.Y - centre.Y;
                 if (dx != 0 || dy != 0) Move(dx, dy);
             } else if (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
-                Wheel(msg, (short)(m.mouseData >> 16));
+                lock (gate) Wheel(msg, (short)(m.mouseData >> 16));
             } else {
-                Button(msg);
+                lock (gate) Button(msg);
             }
         } catch (Exception) { }
         return SWALLOW;
@@ -200,11 +200,20 @@ class InputRouter : IDisposable {
         Native.ClientToScreen(p.Hwnd, ref s);
         return s;
     }
-    void Move(int dx, int dy) {
+    // 1.5: the controller pointer (Pointer.cs) drives the same paths as the mouse, from its own thread; `gate` keeps the two
+    // from interleaving
+    readonly object gate = new object();
+    public void PointerTo(float cx, float cy) { lock (gate) MoveCore(() => { desk.CursorX = cx; desk.CursorY = cy; }); }
+    public void PointerLeft(bool down) { lock (gate) Button(down ? WM_LBUTTONDOWN : WM_LBUTTONUP); }
+    public void PointerRight(bool down) { lock (gate) Button(down ? WM_RBUTTONDOWN : WM_RBUTTONUP); }
+    public void PointerWheel(int delta) { lock (gate) Wheel(WM_MOUSEWHEEL, (short)delta); }
+    public void PointerGrab(bool on) { lock (gate) { if (!on) { target = IntPtr.Zero; buttonsHeld = 0; } } }
+    void Move(int dx, int dy) { lock (gate) MoveCore(() => desk.MoveCursor(dx, dy)); }
+    void MoveCore(Action place) {
         Hit hit;
         lock (desk.Lock) {
             float ox = desk.CursorX, oy = desk.CursorY;
-            desk.MoveCursor(dx, dy);
+            place();
             if (dragging != null) {   // v1.2: by what the cursor really moved, so the header stays under it at the edge of its reach
                 dragging.X += desk.CursorX - ox;
                 dragging.Y += desk.CursorY - oy;

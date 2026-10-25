@@ -44,6 +44,12 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    With the mouse on the windows, **F9** pushes the window under the cursor further away, **F10** pulls it closer (it
    shrinks and grows like a real object), and **F11** brings every window back in front of you. The setting is
    remembered; it starts OFF.
+7. Optional (1.5): click the **left thumbstick** in. The controllers now work the windows instead of the game: the game's
+   hands stay frozen in their pose (its triggers and grips keep what they were, its buttons and sticks go still), and
+   you can walk round them. Point with the right controller: **trigger** clicks (hold it to drag a slider), **A** is the
+   right mouse button, the **right stick** scrolls, **Y** brings every window back in front of you. Either **grip**
+   picks up the window that hand points at and carries it, one in each hand at once; that hand's stick pushes it away
+   or pulls it in. Click the left thumbstick again to give the game its controllers back.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
@@ -109,6 +115,21 @@ stutters. "In the room" means the real room, not the game world: turning the cha
 where they are. Tested on the OpenXR Simulator, home PC, `[verified-numerically 2026-10-25, n=1 each]`: `view_test.py`
 D3D11 and D3D12 PASS in both modes, and with `--room` the layer set its anchor; a photo of the preview with the head
 turned 25 degrees showed the window slid aside in perspective, held in the room. Not yet worn in a real headset.
+
+1.5, 2026-10-25 (Tefa: *"can you make it so that i can actually use the motion controllers to do all the tweaking and
+slider tuning"*, *"the mouse in VR right now is very laggy"*, *"the sliders to somehow move smoothly not trail behind"*, *"the
+ability to grab these windows with LG and RG, two windows at once"*): the controller mode above; the pointer drawn by the
+layer itself every headset frame instead of into the window pictures; the window pictures taken with Windows Graphics
+Capture (`capture/window_capture.cpp`, no redraw: PrintWindow cost 29-40 ms a picture for the slider apps and the app took
+them one after another, so each window got about 12 pictures a second; PrintWindow stays as the fall-back); windows drawn
+farthest first, so a nearer one always covers a farther one. The layer adds its own action set for the Touch and Index
+controllers beside the game's (appended to the game's own bindings, attached and synced with its set); a profile the game
+never suggests is left alone. Tested, home PC, `[verified-numerically 2026-10-25, n=1 each]`: on the OpenXR Simulator a
+stand-in game with its own controller actions kept every sync, state and pose working with ours attached beside them
+(D3D11 and D3D12), and with the controller mode on the aim ray came through every frame; with the installed app and layer
+the pointer landed on the window the simulated controller pointed at; playing the layer's part by hand, the right grip
+carried a window exactly as far as the ray moved, and both grips carried a window each at once. Graphics Capture gave the
+Hand Poser's client area exactly, a grab costing well under a millisecond. Not yet tried in a real headset.
 
 ## Limits
 

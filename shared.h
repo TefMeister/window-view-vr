@@ -21,7 +21,7 @@
 #define WINDOW_VIEW_MAX_H 1600
 #define WINDOW_VIEW_SLOT_BYTES (WINDOW_VIEW_MAX_W * WINDOW_VIEW_MAX_H * 4)   // one pixel buffer
 #define WINDOW_VIEW_SLOT_MAPPING_BYTES (2 * WINDOW_VIEW_SLOT_BYTES)        // both buffers of one slot
-#define WINDOW_VIEW_HEADER_SIZE 512     // bytes; the app maps exactly this much (WindowView.cs SIZE)
+#define WINDOW_VIEW_HEADER_SIZE 628     // bytes; the app maps exactly this much (WindowView.cs SIZE)
 
 // which graphics API the game binds (header `api`)
 #define WINDOW_VIEW_API_NONE 0
@@ -59,7 +59,28 @@ struct WindowViewShared {
     volatile LONG room_mode;         // 500  app: 1 = the windows stay in the room (LOCAL space, around an anchor), 0 = they follow the head
     volatile LONG recenter_seq;      // 504  app: +1 = put the anchor where the head looks now (level, at the head's height)
     volatile LONG anchor_seq_seen;   // 508  layer: the recenter_seq its anchor was set from
-};                                   // 512 bytes
+    // 1.5: the pointer drawn by the layer every frame (smooth), and the motion controllers working the windows
+    volatile LONG cursor_visible;    // 512  app: 1 = draw the pointer
+    volatile LONG cursor_slot;       // 516  app: the window it lies on (its turn is the window's)
+    float cursor_p[3];               // 520  app: its tip, in the desk's frame (the head's in follow mode, the anchor's in room mode)
+    volatile LONG cursor_edge;       // 532  app: 1 = between windows (drawn yellow on the nearest edge)
+    volatile LONG ctrl_mode;         // 536  layer (left stick clicked in) and app (its button): 1 = the controllers work the windows
+    volatile LONG pointer_ready;     // 540  layer: 1 = our controller actions are attached in the game, -1 = they could not be made
+    volatile LONG ray_valid;         // 544  layer: 1 = the ray below is this frame's
+    float ray_o[3];                  // 548  layer: the right controller's aim ray, in the desk's frame (metres)
+    float ray_d[3];                  // 560  layer: ... its direction (unit)
+    float trigger;                   // 572  layer: right trigger 0..1
+    float squeeze;                   // 576  layer: right grip 0..1
+    float stick_y;                   // 580  layer: right stick up (+) / down (-)
+    volatile LONG buttons;           // 584  layer: 1 = A, 2 = Y (left; B on Index), 4 = B
+    volatile LONG ray_seq;           // 588  layer: +1 per frame with a ray
+    // 1.5 (Tefa: "the ability to grab these windows with LG and RG, two windows at once as well one in left and one in right hand")
+    volatile LONG lray_valid;        // 592  layer: 1 = the left ray below is this frame's
+    float lray_o[3];                 // 596  layer: the left controller's aim ray, in the desk's frame
+    float lray_d[3];                 // 608
+    float lsqueeze;                  // 620  layer: left grip 0..1
+    float lstick_y;                  // 624  layer: left stick up (+) / down (-)
+};                                   // 628 bytes
 #pragma pack(pop)
 static_assert(sizeof(WindowViewSlot) == 40, "the app reads this layout by offset");
 static_assert(sizeof(WindowViewShared) == WINDOW_VIEW_HEADER_SIZE, "the app reads this layout by offset");

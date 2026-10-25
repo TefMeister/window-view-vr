@@ -7,7 +7,7 @@ if ($From -eq "") { $From = if (Test-Path (Join-Path $PSScriptRoot "dist\WindowV
 $ErrorActionPreference = "Stop"
 $to = Join-Path $env:LOCALAPPDATA "Programs\WindowView"
 New-Item -ItemType Directory -Force $to | Out-Null
-foreach ($f in "WindowView.exe", "window_view_layer.dll", "window_view_layer32.dll", "window_view.ico") {
+foreach ($f in "WindowView.exe", "window_view_layer.dll", "window_view_layer32.dll", "window_view_capture.dll", "window_view.ico") {
     if (Test-Path (Join-Path $From $f)) { Copy-Item (Join-Path $From $f) (Join-Path $to $f) -Force }
 }
 $shell = New-Object -ComObject WScript.Shell

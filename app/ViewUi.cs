@@ -24,7 +24,7 @@ using System.Windows.Forms;
 class OpenWindow { public IntPtr Hwnd; public string Title, Exe, Path; }
 
 class ViewUi : Form {
-    const int CAPTURE_MS = 33;                    // about 30 pictures a second per window
+    const int CAPTURE_MS = 11;                    // 1.5: up to about 90 pictures a second per window (Graphics Capture costs next to nothing)
     const int MESSAGE_HOLD_MS = 6000;             // a message about adding an app stays this long before the status line returns
     static readonly Color Back = Color.FromArgb(32, 34, 40);
     static readonly Color OnColor = Color.FromArgb(60, 160, 80), OffColor = Color.FromArgb(62, 67, 86);
@@ -40,6 +40,7 @@ class ViewUi : Form {
     readonly Dictionary<string, Bitmap> icons = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
     static readonly ConcurrentDictionary<string, string> names = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     Thread captureThread;
+    Pointer pointer;   // 1.5: the smooth pointer and the controllers (Pointer.cs)
     volatile bool running = true;
     int lastRelink, messageAt = -MESSAGE_HOLD_MS;
 
@@ -94,7 +95,8 @@ class ViewUi : Form {
         top.SetColumnSpan(roomBtn, 2);
         hint.Dock = DockStyle.Fill;
         hint.Text = "Switch the layer ON before the game starts. Drag a window by its dark header, resize it by its corner. " +
-                    "With the mouse on the windows: F9 pushes the window under the cursor back, F10 pulls it in, F11 brings all of them in front of you.";
+                    "With the mouse on the windows: F9 pushes the window under the cursor back, F10 pulls it in, F11 brings all of them in front of you. " +
+                    "Left stick click: the controllers work the windows (trigger = click, grip = carry, stick = scroll, Y = bring them in front); click it again for the game.";
         hint.ForeColor = Dim;
         top.Controls.Add(hint, 0, 2);
         top.SetColumnSpan(hint, 2);
@@ -118,7 +120,7 @@ class ViewUi : Form {
         add.Controls.Add(dropHint);
 
         status.Dock = DockStyle.Bottom;
-        status.Height = 44;
+        status.Height = 62;
         status.Padding = new Padding(8, 4, 8, 4);
         status.ForeColor = Dim;
 
@@ -152,6 +154,8 @@ class ViewUi : Form {
         shared.RoomMode = ReadSetting("room") == "1";   // off unless it was switched on and saved
         ShowRoom();
         input.OnRecenter += delegate { shared.Recenter(); };
+        shared.CtrlMode = false;   // the controllers start on the game
+        pointer = new Pointer(shared, desk, input);
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
         input.Start();
         Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
@@ -213,6 +217,8 @@ class ViewUi : Form {
     protected override void OnFormClosing(FormClosingEventArgs e) {
         running = false;
         uiTimer.Stop();
+        if (pointer != null) pointer.Dispose();
+        shared.CtrlMode = false;  // the game gets its controllers back
         input.Dispose();          // the mouse and keyboard always come back
         if (captureThread != null) captureThread.Join(1000);
         lock (desk.Lock) { desk.Save(); }
@@ -491,6 +497,8 @@ class ViewUi : Form {
         if (Environment.TickCount - lastRelink > 1000) { lastRelink = Environment.TickCount; Relink(); }
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         if (shared.GameConnected && shared.RoomMode) game += shared.AnchorSet ? ", windows in the room" : ", placing the windows...";
+        if (shared.GameConnected) game += shared.PointerReady == 1 ? (shared.CtrlMode ? "\nCONTROLLERS ON THE WINDOWS: trigger clicks, grip carries, left stick click = back to the game" : "\nLeft stick click: the controllers work the windows")
+                                         : shared.PointerReady < 0 ? "\n(the controllers could not be set up in this game)" : "";
         string err = shared.LastError != 0 ? "   last error " + shared.LastError : "";
         string where = "";
         if (input.On) {
@@ -528,7 +536,7 @@ class ViewUi : Form {
                 if (!p.Shown || !p.Live) { shared.Hide(p.Slot); continue; }
                 Capture cap;
                 if (!caps.TryGetValue(p, out cap)) caps[p] = cap = new Capture();
-                Point? cursor = under.P == p ? new Point(under.PicX, under.PicY) : (Point?)null;
+                Point? cursor = null;   // 1.5: the layer draws the pointer itself, every headset frame (Pointer.cs)
                 float x, y, scale, opacity, depth;
                 lock (desk.Lock) { x = p.X; y = p.Y; scale = p.Scale; opacity = p.Opacity; depth = p.Depth; }
                 if (cap.Grab(p.Hwnd, AppName(p), opacity, cursor, outside)) {
