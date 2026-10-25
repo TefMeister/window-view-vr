@@ -104,7 +104,7 @@ instead? ... or simply drag the shortcut to the app window and it would show up?
 gone; apps are added by **ADD AN APP...** or by dropping an app or its shortcut on the window, started if they are not
 running, and each row shows the app's own icon. The sliders are drawn by the app itself (the stock Windows slider
 flickered white whenever a window was photographed), and the window's background is its new icon, a window with plants
-on the sill and a sunny day outside, finely pixelated with the scan lines and rolling light of the Lanes theme. Tested
+on the sill and a sunny day outside, finely pixelated and still (the scan lines and rolling light came off on 2026-10-25 to spare the headset). Tested
 on the home PC: an app picked with **ADD AN APP...** was started and joined the list, and Hand Poser joined by itself when
 it was opened. Dropping a shortcut is not yet tried by hand.
 
