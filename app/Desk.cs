@@ -11,7 +11,8 @@ using System.IO;
 
 class Placement {
     public IntPtr Hwnd;              // IntPtr.Zero while the window is not open
-    public string Exe = "", Title = "";
+    public string Exe = "", Title = "";   // Title "" = any window of that exe (an app added by ADD AN APP or dropped on the window)
+    public string Path = "";              // the exe's full path: its icon on the row, and how it is started when it is not running
     public float X, Y, Scale = Desk.DEFAULT_SCALE, Opacity = 1f;
     public bool Shown = true;
     public int Slot = -1;
@@ -97,8 +98,9 @@ class Desk {
         }
         return best;
     }
-    public Placement Add(IntPtr hwnd, string exe, string title) {
+    public Placement Add(IntPtr hwnd, string exe, string title, string path = "") {
         var p = new Placement();
+        p.Path = path;
         p.Hwnd = hwnd;
         p.Exe = exe;
         p.Title = title;
@@ -122,7 +124,7 @@ class Desk {
         var lines = new List<string>();
         var ci = CultureInfo.InvariantCulture;
         foreach (var p in Windows)
-            lines.Add(string.Join("|", new[] { p.Exe, p.Title.Replace("|", " "), p.X.ToString(ci), p.Y.ToString(ci), p.Scale.ToString(ci), p.Opacity.ToString(ci), p.Shown ? "1" : "0" }));
+            lines.Add(string.Join("|", new[] { p.Exe, p.Title.Replace("|", " "), p.X.ToString(ci), p.Y.ToString(ci), p.Scale.ToString(ci), p.Opacity.ToString(ci), p.Shown ? "1" : "0", p.Path }));
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(File));
             System.IO.File.WriteAllLines(File, lines.ToArray());
@@ -143,6 +145,7 @@ class Desk {
             float.TryParse(f[4], NumberStyles.Float, ci, out p.Scale);
             float.TryParse(f[5], NumberStyles.Float, ci, out p.Opacity);
             p.Shown = f[6] == "1";
+            if (f.Length > 7) p.Path = f[7];   // v1.3: the exe's path (older layout files have none)
             p.Scale = Math.Max(MIN_SCALE, Math.Min(MAX_SCALE, p.Scale == 0 ? DEFAULT_SCALE : p.Scale));
             p.Opacity = Math.Max(0.1f, Math.Min(1f, p.Opacity == 0 ? 1f : p.Opacity));
             p.Slot = FreeSlot();

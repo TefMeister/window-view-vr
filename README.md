@@ -6,7 +6,7 @@
 
 <img src="docs/app-window.png" width="420"> <img src="docs/vr-preview-notepad.png" width="420">
 
-A small desktop app plus an OpenXR layer. Pick any open window (say Hand Freeze, or a browser), and it hangs in front
+A small desktop app plus an OpenXR layer. Add any app (say Hand Freeze, or a browser), and its window hangs in front
 of your eyes inside the game like an in-game menu, about a metre away, turning with your head. You can add as many
 windows as you like, make each one more or less see-through, drag it aside by its dark header and resize it by its
 corner, all with the mouse. A switch, **MOUSE & KEYBOARD**, decides who gets your mouse and keyboard: normally the
@@ -31,9 +31,10 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
 1. Double-click **Window View** on the desktop and press **VR LAYER: OFF** so it says **ON**. Leave it on.
 2. Start the game. The layer must be on **before** the game starts (OpenXR add-ons load at start); a game that was
    already running needs one restart. The bottom line says *Connected: <game>.exe (D3D11)* once the game draws.
-3. Pick a window in the **Open windows** list and press **ADD TO VR** (or double-click it). It appears in the headset,
-   straight ahead. Each added window gets a row under **In VR** with a **See-through** slider, a **Size** slider, a
-   **Show** box and **REMOVE**.
+3. Press **ADD AN APP...** and pick the app's .exe (or a shortcut to it), or simply drag the app or its shortcut onto
+   the Window View window. If the app is not running, it is started. Its window appears in the headset, straight ahead,
+   as soon as it opens, and again every time the app is opened later. Each added app gets a row under **IN VR** with
+   its own icon, a **See-through** slider, a **Size** slider, a **Show** box and **REMOVE**.
 4. Press **Page Up** (or the big button). Now your mouse moves a small arrow across the floating windows and your
    keyboard types into the one you last clicked. The game gets neither. Drag a window by its dark header to move it,
    drag the three little lines in its bottom-right corner to resize it.
@@ -85,6 +86,15 @@ tried again:
   between windows.
 
 v1.2 worn the same evening, home PC, real headset (Tefa): *"this works really well now!"*
+
+v1.3, 2026-10-25 (Tefa: *"instead of having a list of open apps to choose from, can we have an add window button
+instead? ... or simply drag the shortcut to the app window and it would show up?"*): the list of every open window is
+gone; apps are added by **ADD AN APP...** or by dropping an app or its shortcut on the window, started if they are not
+running, and each row shows the app's own icon. The sliders are drawn by the app itself (the stock Windows slider
+flickered white whenever a window was photographed), and the window's background is its new icon, a window with plants
+on the sill and a sunny day outside, finely pixelated with the scan lines and rolling light of the Lanes theme. Tested
+on the home PC: an app picked with **ADD AN APP...** was started and joined the list, and Hand Poser joined by itself when
+it was opened. Dropping a shortcut is not yet tried by hand.
 
 ## Limits
 

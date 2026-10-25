@@ -1,31 +1,46 @@
 // ViewUi.cs -- the Window View window: the layer ON/OFF switch, the big MOUSE & KEYBOARD button, which game is connected,
-// the list of open windows to add, and one row per added window (see-through, size, show, remove). A background loop
-// captures every added window about 30 times a second and hands the pictures to the layer through Shared.
+// ADD AN APP (or drop an app or its shortcut on the window), and one row per added app (its icon and name, see-through,
+// size, show, remove). A background loop captures every added window about 30 times a second and hands the pictures to
+// the layer through Shared.
+//
+// v1.3 (2026-10-25, Tefa: "instead of having a list of open apps to choose from, can we have an add window button instead?
+// so that i would have to navigate to the app folder and choose the exe. or simply drag the shortcut to the app window and
+// it would show up?"): the list of every open window is gone. An app is added by its exe (picked, or dropped as an exe or a
+// shortcut); if it is not running it is started; its window joins the headset as soon as it opens, and again whenever the
+// app is opened later. Each row shows the app's own icon ("could these have the actual app icon added to them"). The
+// sliders are drawn by the app (Skin.cs), and the background is the Window View icon pixelated in the Lanes theme's style.
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-class OpenWindow { public IntPtr Hwnd; public string Title, Exe; public override string ToString() { return Title + "   (" + Exe + ")"; } }
+class OpenWindow { public IntPtr Hwnd; public string Title, Exe, Path; }
 
 class ViewUi : Form {
     const int CAPTURE_MS = 33;                    // about 30 pictures a second per window
-    static readonly Color OnColor = Color.FromArgb(60, 160, 80), OffColor = Color.FromArgb(70, 70, 70);
+    const int MESSAGE_HOLD_MS = 6000;             // a message about adding an app stays this long before the status line returns
+    static readonly Color Back = Color.FromArgb(32, 34, 40);
+    static readonly Color OnColor = Color.FromArgb(60, 160, 80), OffColor = Color.FromArgb(62, 67, 86);
+    static readonly Color RowTint = Color.FromArgb(165, 44, 47, 54), Ink = Color.White, Dim = Color.FromArgb(200, 204, 214);
     readonly Shared shared = new Shared();
     readonly Desk desk = new Desk();
     readonly InputRouter input;
-    readonly Button layerBtn = new Button(), inputBtn = new Button(), refreshBtn = new Button(), addBtn = new Button();
-    readonly ListBox openList = new ListBox();
+    readonly Button layerBtn = new Button(), inputBtn = new Button(), addBtn = new Button();
     readonly FlowLayoutPanel rows = new FlowLayoutPanel();
-    readonly Label status = new Label(), hint = new Label();
+    readonly Label status = new SkinLabel(), hint = new SkinLabel(), dropHint = new SkinLabel();
     readonly System.Windows.Forms.Timer uiTimer = new System.Windows.Forms.Timer();
+    readonly Dictionary<string, Bitmap> icons = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
+    static readonly ConcurrentDictionary<string, string> names = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     Thread captureThread;
     volatile bool running = true;
-    int lastRelink, lastListed;
+    int lastRelink, messageAt = -MESSAGE_HOLD_MS;
 
     delegate bool EnumProc(IntPtr hwnd, IntPtr l);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr l);
@@ -42,17 +57,22 @@ class ViewUi : Form {
     public ViewUi() {
         input = new InputRouter(desk);
         Text = "Window View";
-        ClientSize = new Size(560, 640);
-        MinimumSize = new Size(480, 400);
+        ClientSize = new Size(580, 640);
+        MinimumSize = new Size(500, 420);
         Font = new Font("Segoe UI", 9.5f);
-        BackColor = Color.FromArgb(32, 34, 40);
-        ForeColor = Color.White;
-        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
+        BackColor = Back;
+        ForeColor = Ink;
+        DoubleBuffered = true;
+        string ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "window_view.ico");
+        try { Icon = File.Exists(ico) ? new Icon(ico) : Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
+        Backdrop.Init(this, ico, Back);
+        DropTarget(this);
 
         var top = new TableLayoutPanel();
         top.Dock = DockStyle.Top;
         top.Height = 112;
         top.ColumnCount = 2;
+        top.BackColor = Color.Transparent;
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         top.Padding = new Padding(8);
@@ -64,75 +84,67 @@ class ViewUi : Form {
         inputBtn.Click += delegate { input.SetOn(!input.On); };
         top.Controls.Add(layerBtn, 0, 0);
         top.Controls.Add(inputBtn, 1, 0);
-        top.SetColumnSpan(inputBtn, 1);
         hint.Dock = DockStyle.Fill;
         hint.Text = "Switch the layer ON before the game starts. Windows follow your head; drag one by its dark header, resize by its corner.";
-        hint.ForeColor = Color.Gainsboro;
+        hint.ForeColor = Dim;
         top.Controls.Add(hint, 0, 1);
         top.SetColumnSpan(hint, 2);
 
-        var mid = new Panel();
-        mid.Dock = DockStyle.Top;
-        mid.Height = 190;
-        mid.Padding = new Padding(8, 0, 8, 0);
-        var openLabel = new Label();
-        openLabel.Text = "Open windows";
-        openLabel.Dock = DockStyle.Top;
-        openLabel.Height = 20;
-        openList.Dock = DockStyle.Fill;
-        openList.BackColor = Color.FromArgb(24, 26, 30);
-        openList.ForeColor = Color.White;
-        openList.DoubleClick += delegate { AddSelected(); };
-        var btns = new FlowLayoutPanel();
-        btns.Dock = DockStyle.Bottom;
-        btns.Height = 36;
-        btns.FlowDirection = FlowDirection.RightToLeft;
-        Style(addBtn, "ADD TO VR");
-        addBtn.Width = 140;
-        addBtn.Click += delegate { AddSelected(); };
-        Style(refreshBtn, "REFRESH");
-        refreshBtn.Width = 110;
-        refreshBtn.Click += delegate { RefreshOpen(); };
-        // v1.2: Style() docks a button to Fill, which a FlowLayoutPanel does not lay out: on the home PC both buttons
-        // were not drawn at all, leaving an empty strip under the list (Tefa 2026-10-24: "where?")
-        foreach (var b in new[] { addBtn, refreshBtn }) { b.Dock = DockStyle.None; b.Height = 28; }
-        btns.Controls.Add(addBtn);
-        btns.Controls.Add(refreshBtn);
-        mid.Controls.Add(openList);
-        mid.Controls.Add(btns);
-        mid.Controls.Add(openLabel);
+        var add = new FlowLayoutPanel();
+        add.Dock = DockStyle.Top;
+        add.Height = 50;
+        add.BackColor = Color.Transparent;
+        add.Padding = new Padding(8, 4, 8, 0);
+        add.WrapContents = false;
+        Style(addBtn, "ADD AN APP...");
+        addBtn.Dock = DockStyle.None;
+        addBtn.Size = new Size(150, 36);
+        addBtn.Font = new Font("Segoe UI Semibold", 10f);
+        addBtn.Click += delegate { PickApp(); };
+        dropHint.Text = "or drag an app, or its shortcut, onto this window";
+        dropHint.ForeColor = Dim;
+        dropHint.AutoSize = true;
+        dropHint.Padding = new Padding(6, 11, 0, 0);
+        add.Controls.Add(addBtn);
+        add.Controls.Add(dropHint);
 
         status.Dock = DockStyle.Bottom;
         status.Height = 44;
         status.Padding = new Padding(8, 4, 8, 4);
-        status.ForeColor = Color.Gainsboro;
+        status.ForeColor = Dim;
 
-        var rowsLabel = new Label();
-        rowsLabel.Text = "In VR";
+        var rowsLabel = new SkinLabel();
+        rowsLabel.Text = "IN VR";
+        rowsLabel.Font = new Font("Segoe UI Semibold", 10f);
         rowsLabel.Dock = DockStyle.Top;
-        rowsLabel.Height = 24;
-        rowsLabel.Padding = new Padding(8, 4, 0, 0);
+        rowsLabel.Height = 26;
+        rowsLabel.Padding = new Padding(8, 6, 0, 0);
         rows.Dock = DockStyle.Fill;
         rows.FlowDirection = FlowDirection.TopDown;
         rows.WrapContents = false;
         rows.AutoScroll = true;
+        rows.BackColor = Color.Transparent;
         rows.Padding = new Padding(8, 0, 8, 0);
-        // WinForms lays docked controls out from the END of this list to the front, so the order here is: top strip
-        // first, then the open-window list, then the "In VR" heading, the status line at the bottom, the rows filling the rest
+        rows.Scroll += (s, e) => rows.Invalidate(true);       // the background stays put while the rows scroll
+        rows.MouseWheel += (s, e) => rows.Invalidate(true);
+        rows.Resize += (s, e) => { foreach (Control c in rows.Controls) c.Width = rows.ClientSize.Width - 24; };
+        // WinForms lays docked controls out from the END of this list to the front, so the order here is: top strip first,
+        // then ADD AN APP, then the "IN VR" heading, the status line at the bottom, the rows filling the rest
         Controls.Clear();
         Controls.Add(rows);
         Controls.Add(status);
         Controls.Add(rowsLabel);
-        Controls.Add(mid);
+        Controls.Add(add);
         Controls.Add(top);
+        foreach (Control c in Controls) DropTargets(c);   // a drop lands wherever the mouse is, on a button or a row too
 
         desk.Load();
+        FindMissingPaths();
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
         input.Start();
         Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
         ShowLayer();
         ShowInput();
-        RefreshOpen();
         Relink();
         RebuildRows();
         captureThread = new Thread(CaptureLoop);
@@ -143,10 +155,13 @@ class ViewUi : Form {
         uiTimer.Start();
     }
 
+    protected override void OnPaintBackground(PaintEventArgs e) { Backdrop.PaintUnder(this, e.Graphics, e.ClipRectangle); }
+    protected override CreateParams CreateParams { get { return Backdrop.Composited(base.CreateParams); } }
+
     static void Style(Button b, string text) {
         b.Text = text;
         b.FlatStyle = FlatStyle.Flat;
-        b.FlatAppearance.BorderColor = Color.DimGray;
+        b.FlatAppearance.BorderColor = Color.FromArgb(90, 96, 118);
         b.BackColor = OffColor;
         b.ForeColor = Color.White;
         b.Dock = DockStyle.Fill;
@@ -157,6 +172,7 @@ class ViewUi : Form {
         inputBtn.Text = input.On ? "MOUSE && KEYBOARD: TO THE WINDOWS   (Page Down = back)" : "MOUSE && KEYBOARD: NORMAL   (Page Up = to the windows)";
         inputBtn.BackColor = input.On ? OnColor : OffColor;
     }
+    void Say(string text) { status.Text = text; messageAt = Environment.TickCount; }
 
     protected override void OnFormClosing(FormClosingEventArgs e) {
         running = false;
@@ -168,7 +184,119 @@ class ViewUi : Form {
         base.OnFormClosing(e);
     }
 
-    // ---- the open-window list ------------------------------------------------------------------------------------
+    // ---- adding an app ---------------------------------------------------------------------------------------------
+    void PickApp() {
+        using (var d = new OpenFileDialog()) {
+            d.Title = "Pick the app to show in VR (its .exe, or a shortcut to it)";
+            d.Filter = "Apps and shortcuts (*.exe;*.lnk)|*.exe;*.lnk";
+            d.DereferenceLinks = true;
+            if (d.ShowDialog(this) == DialogResult.OK) AddApp(d.FileName);
+        }
+    }
+
+    // a dropped or picked .exe or .lnk: the app's window goes into the headset, and the app is started if it is not running
+    internal void AddApp(string file) {
+        string exe = file;
+        if (file.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) exe = ShortcutTarget(file);
+        if (string.IsNullOrEmpty(exe) || !exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(exe)) {
+            Say(Path.GetFileName(file) + " does not lead to an app (.exe), so it cannot be added.");
+            return;
+        }
+        if (string.Equals(Path.GetFileName(exe), Path.GetFileName(Application.ExecutablePath), StringComparison.OrdinalIgnoreCase)) {
+            Say("Window View cannot show itself in VR.");
+            return;
+        }
+        string name = Path.GetFileName(exe);
+        lock (desk.Lock) {
+            foreach (var p in desk.Windows)
+                if (string.Equals(p.Exe, name, StringComparison.OrdinalIgnoreCase)) { Say(AppName(p) + " is already in VR."); return; }
+            if (desk.FreeSlot() < 0) { Say("All " + Shared.SLOTS + " places are taken; remove one first."); return; }
+            desk.Add(IntPtr.Zero, name, "", exe);
+            desk.Save();
+        }
+        bool open = false;
+        foreach (var w in ListOpen()) if (string.Equals(w.Exe, name, StringComparison.OrdinalIgnoreCase)) { open = true; break; }
+        if (!open) {
+            try {
+                Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = true });
+                Say("Starting " + FriendlyName(exe) + "; its window joins VR as soon as it opens.");
+            } catch (Exception ex) { Say("Could not start " + FriendlyName(exe) + ": " + ex.Message); }
+        } else Say(FriendlyName(exe) + " added.");
+        Relink();
+        RebuildRows();
+    }
+
+    // every control takes a dropped app (a control that does not accept the drop would show the "no" cursor over itself)
+    void DropTarget(Control c) {
+        c.AllowDrop = true;
+        c.DragEnter += (s, e) => { e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Link : DragDropEffects.None; };
+        c.DragDrop += (s, e) => { var files = e.Data.GetData(DataFormats.FileDrop) as string[]; if (files != null) BeginInvoke(new Action(() => { foreach (var f in files) AddApp(f); })); };
+    }
+    void DropTargets(Control c) { DropTarget(c); foreach (Control ch in c.Controls) DropTargets(ch); }
+
+    // the target of a Windows shortcut, read through the Windows Script Host (no extra library needed)
+    static string ShortcutTarget(string lnk) {
+        object shell = null, link = null;
+        try {
+            Type t = Type.GetTypeFromProgID("WScript.Shell");
+            shell = Activator.CreateInstance(t);
+            link = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
+            return (string)link.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, link, null);
+        } catch (Exception) { return null; }
+        finally {
+            if (link != null) Marshal.ReleaseComObject(link);
+            if (shell != null) Marshal.ReleaseComObject(shell);
+        }
+    }
+
+    // the app's own name (its file description), worked out once per exe
+    static string FriendlyName(string exe) {
+        return names.GetOrAdd(exe, e => {
+            try {
+                var v = FileVersionInfo.GetVersionInfo(e);
+                if (!string.IsNullOrWhiteSpace(v.FileDescription)) return v.FileDescription.Trim();
+                if (!string.IsNullOrWhiteSpace(v.ProductName)) return v.ProductName.Trim();
+            } catch (Exception) { }
+            return Spaced(Path.GetFileNameWithoutExtension(e));
+        });
+    }
+    // "GrabZones" -> "Grab Zones": an exe with no name inside it still reads as words
+    static string Spaced(string s) { return System.Text.RegularExpressions.Regex.Replace(s, "(?<=[a-z])(?=[A-Z])", " "); }
+    static string AppName(Placement p) {
+        if (p.Title != "") return p.Title;                              // a row from before v1.3 keeps the name it was given
+        if (p.Path != "" && File.Exists(p.Path)) return FriendlyName(p.Path);
+        return Spaced(Path.GetFileNameWithoutExtension(p.Exe));
+    }
+
+    Bitmap IconOf(string path) {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+        Bitmap b;
+        if (icons.TryGetValue(path, out b)) return b;
+        try { using (var ic = Icon.ExtractAssociatedIcon(path)) using (var raw = ic.ToBitmap()) b = new Bitmap(raw, 32, 32); } catch (Exception) { b = null; }
+        icons[path] = b;
+        return b;
+    }
+
+    // rows from before v1.3 kept no path: look for the exe where our installers put apps (%LOCALAPPDATA%\Programs\<app>\),
+    // so their icons show and they can be started, even before the app is opened once
+    void FindMissingPaths() {
+        string programs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs");
+        bool found = false;
+        lock (desk.Lock) {
+            foreach (var p in desk.Windows) {
+                if (p.Path != "" || !Directory.Exists(programs)) continue;
+                try {
+                    foreach (var dir in Directory.GetDirectories(programs)) {
+                        string f = Path.Combine(dir, p.Exe);
+                        if (File.Exists(f)) { p.Path = f; found = true; break; }
+                    }
+                } catch (Exception) { }
+            }
+            if (found) desk.Save();
+        }
+    }
+
+    // ---- the open windows, to link the added apps to ----------------------------------------------------------------
     List<OpenWindow> ListOpen() {
         var list = new List<OpenWindow>();
         uint me = (uint)Process.GetCurrentProcess().Id;
@@ -184,131 +312,147 @@ class ViewUi : Form {
             var w = new OpenWindow();
             w.Hwnd = hwnd;
             w.Title = title;
-            w.Exe = ExeOf(pid);
+            w.Path = PathOf(pid);
+            w.Exe = Path.GetFileName(w.Path);
             list.Add(w);
             return true;
         }, IntPtr.Zero);
         return list;
     }
-    static string ExeOf(uint pid) {
+    static string PathOf(uint pid) {
         IntPtr h = OpenProcess(0x1000, false, pid);   // PROCESS_QUERY_LIMITED_INFORMATION
         if (h == IntPtr.Zero) return "?";
         var sb = new StringBuilder(1024);
         int n = sb.Capacity;
         string path = QueryFullProcessImageName(h, 0, sb, ref n) ? sb.ToString() : "?";
         CloseHandle(h);
-        return System.IO.Path.GetFileName(path);
+        return path;
     }
-    // v1.2: also every two seconds by itself, so a window opened after Window View shows up without REFRESH (Tefa
-    // 2026-10-24: "hand poser is not on the list"; it was opened 47 s after Window View, and the list was only read at
-    // start); the list is only rebuilt when it changed, and the picked line stays picked
-    void RefreshOpen() {
-        var list = ListOpen();
-        bool same = list.Count == openList.Items.Count;
-        for (int i = 0; same && i < list.Count; ++i) {
-            var o = (OpenWindow)openList.Items[i];
-            same = o.Hwnd == list[i].Hwnd && o.Title == list[i].Title;
-        }
-        if (same) return;
-        var picked = openList.SelectedItem as OpenWindow;
-        openList.BeginUpdate();
-        openList.Items.Clear();
-        foreach (var w in list) {
-            openList.Items.Add(w);
-            if (picked != null && w.Hwnd == picked.Hwnd) openList.SelectedItem = w;
-        }
-        openList.EndUpdate();
-    }
-    void AddSelected() {
-        var w = openList.SelectedItem as OpenWindow;
-        if (w == null) return;
-        lock (desk.Lock) {
-            foreach (var p in desk.Windows) if (p.Hwnd == w.Hwnd) { status.Text = w.Title + " is already in VR."; return; }
-            if (desk.FreeSlot() < 0) { status.Text = "All " + Shared.SLOTS + " places are taken; remove one first."; return; }
-            desk.Add(w.Hwnd, w.Exe, w.Title);
-            desk.Save();
-        }
-        RebuildRows();
-    }
-    // a window from the layout file (or one that was closed) is linked to a live window again by exe name and title
+
+    // an added app (or one from the layout file, or one that was closed) is linked to a live window again by exe name, and
+    // by title when one was kept (layouts from before v1.3); a window already shown by another row is never taken twice
     void Relink() {
         List<OpenWindow> open = null;
+        bool changed = false;
         lock (desk.Lock) {
             foreach (var p in desk.Windows) {
                 if (p.Live && Native.IsWindow(p.Hwnd)) continue;
+                if (p.Live) changed = true;
                 p.Hwnd = IntPtr.Zero;
                 if (open == null) open = ListOpen();
                 foreach (var w in open) {
                     bool sameExe = string.Equals(w.Exe, p.Exe, StringComparison.OrdinalIgnoreCase);
-                    if (sameExe && (w.Title == p.Title || w.Title.StartsWith(p.Title) || p.Title.StartsWith(w.Title))) { p.Hwnd = w.Hwnd; break; }
+                    bool sameTitle = p.Title == "" || w.Title == p.Title || w.Title.StartsWith(p.Title) || p.Title.StartsWith(w.Title);
+                    bool taken = false;
+                    foreach (var q in desk.Windows) taken |= q != p && q.Hwnd == w.Hwnd;
+                    if (sameExe && sameTitle && !taken) {
+                        p.Hwnd = w.Hwnd;
+                        if (p.Path == "" && File.Exists(w.Path)) { p.Path = w.Path; desk.Save(); }
+                        changed = true;
+                        break;
+                    }
                 }
                 if (!p.Live) shared.Hide(p.Slot);
             }
         }
+        if (changed && IsHandleCreated) BeginInvoke(new Action(ShowRowStates));
     }
 
     // ---- the rows ------------------------------------------------------------------------------------------------
+    readonly Dictionary<Placement, Label> rowState = new Dictionary<Placement, Label>();
+    readonly Dictionary<Placement, PictureBox> rowIcon = new Dictionary<Placement, PictureBox>();
+
     void RebuildRows() {
         rows.SuspendLayout();
+        foreach (Control c in rows.Controls) c.Dispose();
         rows.Controls.Clear();
+        rowState.Clear();
+        rowIcon.Clear();
         List<Placement> list;
         lock (desk.Lock) { list = new List<Placement>(desk.Windows); }
-        foreach (var p in list) rows.Controls.Add(Row(p));
+        foreach (var p in list) { var row = Row(p); DropTargets(row); rows.Controls.Add(row); }
         rows.ResumeLayout();
+        ShowRowStates();
+        rows.Invalidate(true);
     }
+    void ShowRowStates() {
+        lock (desk.Lock) {
+            foreach (var kv in rowState) kv.Value.Text = kv.Key.Live ? "" : "waiting for its window: open the app, it joins by itself";
+            foreach (var kv in rowIcon) if (kv.Value.Image == null) kv.Value.Image = IconOf(kv.Key.Path);   // an old row learns its path once linked
+        }
+    }
+
     Control Row(Placement p) {
         var panel = new TableLayoutPanel();
         panel.Width = rows.ClientSize.Width - 24;
-        panel.Height = 58;
-        panel.ColumnCount = 5;
+        panel.Height = 70;
+        panel.ColumnCount = 6;
         panel.RowCount = 2;
-        panel.BackColor = Color.FromArgb(44, 47, 54);
+        panel.BackColor = RowTint;
         panel.Margin = new Padding(0, 0, 0, 6);
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 46));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
-        var title = new Label();
-        title.Text = p.Title + "  (" + p.Exe + ")";
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        var pic = new PictureBox();
+        pic.Size = new Size(32, 32);
+        pic.SizeMode = PictureBoxSizeMode.Zoom;
+        pic.BackColor = Color.Transparent;
+        pic.Anchor = AnchorStyles.None;
+        pic.Image = IconOf(p.Path);
+        panel.Controls.Add(pic, 0, 0);
+        panel.SetRowSpan(pic, 2);
+        rowIcon[p] = pic;
+        var title = new SkinLabel();
+        title.Text = AppName(p);
+        title.Font = new Font("Segoe UI Semibold", 10f);
         title.AutoEllipsis = true;
         title.Dock = DockStyle.Fill;
         title.TextAlign = ContentAlignment.MiddleLeft;
-        panel.Controls.Add(title, 0, 0);
-        panel.SetColumnSpan(title, 2);
-        var opacityLabel = new Label(); opacityLabel.Text = "See-through"; opacityLabel.Dock = DockStyle.Fill; opacityLabel.TextAlign = ContentAlignment.MiddleLeft;
-        var opacity = new TrackBar();
-        opacity.Minimum = 10; opacity.Maximum = 100; opacity.TickFrequency = 10; opacity.AutoSize = false; opacity.Height = 24; opacity.Dock = DockStyle.Fill;
+        panel.Controls.Add(title, 1, 0);
+        var state = new SkinLabel();
+        state.ForeColor = Color.FromArgb(230, 190, 90);
+        state.AutoEllipsis = true;
+        state.Dock = DockStyle.Fill;
+        state.TextAlign = ContentAlignment.MiddleLeft;
+        panel.Controls.Add(state, 2, 0);
+        rowState[p] = state;
+        var opacityLabel = new SkinLabel(); opacityLabel.Text = "See-through"; opacityLabel.ForeColor = Dim; opacityLabel.Dock = DockStyle.Fill; opacityLabel.TextAlign = ContentAlignment.MiddleLeft;
+        var opacity = new FancySlider();
+        opacity.Minimum = 10; opacity.Maximum = 100; opacity.SmallChange = 5; opacity.Height = 30; opacity.Dock = DockStyle.Fill;
         opacity.Value = (int)Math.Round(Math.Max(0.1f, Math.Min(1f, p.Opacity)) * 100);
         opacity.ValueChanged += delegate { lock (desk.Lock) { p.Opacity = opacity.Value / 100f; } };
-        opacity.MouseUp += delegate { lock (desk.Lock) { desk.Save(); } };
-        panel.Controls.Add(opacityLabel, 0, 1);
-        panel.Controls.Add(opacity, 1, 1);
-        var size = new TrackBar();
-        size.Minimum = 30; size.Maximum = 300; size.TickFrequency = 30; size.AutoSize = false; size.Height = 24; size.Dock = DockStyle.Fill;
+        opacity.Released += delegate { lock (desk.Lock) { desk.Save(); } };
+        panel.Controls.Add(opacityLabel, 1, 1);
+        panel.Controls.Add(opacity, 2, 1);
+        var size = new FancySlider();
+        size.Minimum = 30; size.Maximum = 300; size.SmallChange = 10; size.Height = 30; size.Dock = DockStyle.Fill;
         size.Value = Math.Max(30, Math.Min(300, (int)Math.Round(p.Scale / Desk.DEFAULT_SCALE * 100)));
         size.ValueChanged += delegate { lock (desk.Lock) { p.Scale = Desk.DEFAULT_SCALE * size.Value / 100f; } };
-        size.MouseUp += delegate { lock (desk.Lock) { desk.Save(); } };
-        var sizeLabel = new Label(); sizeLabel.Text = "Size"; sizeLabel.Dock = DockStyle.Fill; sizeLabel.TextAlign = ContentAlignment.MiddleCenter;
-        panel.Controls.Add(sizeLabel, 2, 0);
-        panel.Controls.Add(size, 2, 1);
+        size.Released += delegate { lock (desk.Lock) { desk.Save(); } };
+        var sizeLabel = new SkinLabel(); sizeLabel.Text = "Size"; sizeLabel.ForeColor = Dim; sizeLabel.Dock = DockStyle.Fill; sizeLabel.TextAlign = ContentAlignment.MiddleCenter;
+        panel.Controls.Add(sizeLabel, 3, 0);
+        panel.Controls.Add(size, 3, 1);
         panel.SetColumnSpan(size, 2);
         var shown = new CheckBox();
-        shown.Text = "Show"; shown.Checked = p.Shown; shown.Dock = DockStyle.Fill;
+        shown.Text = "Show"; shown.Checked = p.Shown; shown.Dock = DockStyle.Fill; shown.BackColor = Color.Transparent;
         shown.CheckedChanged += delegate { lock (desk.Lock) { p.Shown = shown.Checked; if (!p.Shown) shared.Hide(p.Slot); desk.Save(); } };
-        panel.Controls.Add(shown, 3, 0);
+        panel.Controls.Add(shown, 4, 0);
         var remove = new Button();
         Style(remove, "REMOVE");
         remove.Click += delegate { lock (desk.Lock) { desk.Remove(p); shared.Hide(p.Slot); desk.Save(); } RebuildRows(); };
-        panel.Controls.Add(remove, 4, 0);
+        panel.Controls.Add(remove, 5, 0);
         panel.SetRowSpan(remove, 2);
         return panel;
     }
 
     // ---- every half second ---------------------------------------------------------------------------------------
     void Tick() {
-        if (Environment.TickCount - lastRelink > 2000) { lastRelink = Environment.TickCount; Relink(); }
-        if (Environment.TickCount - lastListed > 2000) { lastListed = Environment.TickCount; RefreshOpen(); }
+        if (Environment.TickCount - lastRelink > 1000) { lastRelink = Environment.TickCount; Relink(); }
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         string err = shared.LastError != 0 ? "   last error " + shared.LastError : "";
         string where = "";
@@ -316,10 +460,13 @@ class ViewUi : Form {
             lock (desk.Lock) {
                 var hit = desk.HitTest(desk.CursorX, desk.CursorY);
                 where = string.Format(System.Globalization.CultureInfo.InvariantCulture, "   cursor {0:0.000} {1:0.000} {2}", desk.CursorX, desk.CursorY,
-                    hit.Kind == HitKind.None ? "over nothing" : hit.Kind + " of " + hit.P.Title + " at " + hit.PicX + "," + hit.PicY);
+                    hit.Kind == HitKind.None ? "over nothing" : hit.Kind + " of " + AppName(hit.P) + " at " + hit.PicX + "," + hit.PicY);
             }
         }
-        status.Text = game + err + "\n" + input.LastAction + where;
+        if (Environment.TickCount - messageAt > MESSAGE_HOLD_MS) {   // a message about adding an app is left up for a while
+            string text = game + err + "\n" + input.LastAction + where;
+            if (status.Text != text) status.Text = text;
+        }
         ShowLayer();
     }
 
@@ -347,7 +494,7 @@ class ViewUi : Form {
                 Point? cursor = under.P == p ? new Point(under.PicX, under.PicY) : (Point?)null;
                 float x, y, scale, opacity;
                 lock (desk.Lock) { x = p.X; y = p.Y; scale = p.Scale; opacity = p.Opacity; }
-                if (cap.Grab(p.Hwnd, p.Title, opacity, cursor, outside)) {
+                if (cap.Grab(p.Hwnd, AppName(p), opacity, cursor, outside)) {
                     lock (desk.Lock) { p.PicW = cap.Width; p.PicH = cap.Height; }
                     shared.Publish(p.Slot, cap.Pixels, cap.Width, cap.Height, x, y, scale);
                 }
