@@ -12,6 +12,7 @@
 //                same style as our Lanes plugin background, only dim and coloured, not green").
 //   SkinPanel    a panel that paints the backdrop at its own place in the window, then its Tint (a see-through colour) over it.
 //                Children with a Transparent BackColor show it through.
+//   SkinButton, SkinCheckBox, SkinRadioButton: take the clicks Window View sends from the headset (see below).
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -200,6 +201,44 @@ class SkinLabel : Label {
     public SkinLabel() {
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.SupportsTransparentBackColor, true);
         BackColor = Color.Transparent;
+    }
+}
+
+// Buttons and tick boxes that take a click Window View sends. Window View clicks by posting the mouse-down and mouse-up messages
+// to the control under its VR cursor; the stock ButtonBase only clicks when the control is ALSO the topmost window at that spot
+// on the real desktop (WindowFromPoint), and a window used in the headset is usually behind others there, so nothing happened
+// (Tefa 2026-10-25: "clicking on any of these does not bring up the sliders in hand poser"; the drawn sliders never checked).
+// These click on a down and an up inside them, the stock way first, and themselves only when the stock way did not.
+class SkinButton : Button {
+    bool down, clicked;
+    protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) down = true; }
+    protected override void OnClick(EventArgs e) { clicked = true; base.OnClick(e); }
+    protected override void OnMouseUp(MouseEventArgs e) {
+        bool was = down; down = false; clicked = false;
+        base.OnMouseUp(e);
+        if (was && !clicked && e.Button == MouseButtons.Left && Enabled && ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
+    }
+}
+class SkinCheckBox : CheckBox {
+    bool down, clicked;
+    public SkinCheckBox() { BackColor = Color.Transparent; }
+    protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) down = true; }
+    protected override void OnClick(EventArgs e) { clicked = true; base.OnClick(e); }
+    protected override void OnMouseUp(MouseEventArgs e) {
+        bool was = down; down = false; clicked = false;
+        base.OnMouseUp(e);
+        if (was && !clicked && e.Button == MouseButtons.Left && Enabled && ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
+    }
+}
+class SkinRadioButton : RadioButton {
+    bool down, clicked;
+    public SkinRadioButton() { BackColor = Color.Transparent; }
+    protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) down = true; }
+    protected override void OnClick(EventArgs e) { clicked = true; base.OnClick(e); }
+    protected override void OnMouseUp(MouseEventArgs e) {
+        bool was = down; down = false; clicked = false;
+        base.OnMouseUp(e);
+        if (was && !clicked && e.Button == MouseButtons.Left && Enabled && ClientRectangle.Contains(e.Location)) OnClick(EventArgs.Empty);
     }
 }
 
