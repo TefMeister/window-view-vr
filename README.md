@@ -51,6 +51,9 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    picks up the window that hand points at and carries it, one in each hand at once; that hand's stick pushes it away
    or pulls it in. Click the left thumbstick again to give the game its controllers back. While the Hand Poser has sliders
    ticked, X / Y / A / B and the grips step those sliders instead (see the Hand Poser's readme).
+8. Optional (1.6): **CONTROLLERS: GAME ONLY** leaves the controllers to the game alone: the windows and the mouse still
+   work, the left stick click does nothing for Window View. Use it when the game stops seeing your controllers with Window
+   View on (seen once in Village on Virtual Desktop, 2026-10-27). Takes effect at the next game start.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
@@ -131,6 +134,14 @@ stand-in game with its own controller actions kept every sync, state and pose wo
 the pointer landed on the window the simulated controller pointed at; playing the layer's part by hand, the right grip
 carried a window exactly as far as the ray moved, and both grips carried a window each at once. Graphics Capture gave the
 Hand Poser's client area exactly, a grab costing well under a millisecond. Not yet tried in a real headset.
+
+1.6, 2026-10-27 (Tefa, in Village on Virtual Desktop: *"with the window view on, my controller is not working"*): REFramework
+said "using controllers false" for the whole run, on two nights, while Window View's own controller actions worked. Likely
+cause `[hypothesis]`: the runtime gives each button to one action, and ours (bound to the same buttons) won. The new switch
+**CONTROLLERS: GAME ONLY** (`controllers=0` in settings.txt, read by the layer once at the game's first binding call) adds
+no action set and no bindings at all. Tested `[verified-numerically 2026-10-27, n=1 each]`: `view_test.py both --actions
+--game-only` PASS (the game's actions all work, the windows still show, the layer reports "left to the game"), and the
+default `--actions` still PASS. Not yet tried in the headset.
 
 ## Limits
 

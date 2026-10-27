@@ -10,6 +10,8 @@ LOOKS like is checked by eye with the simulator's screenshot (the MCP capture_sc
 --room (1.4): the room mode on; also PASS only when the layer set its anchor in the room.
 --actions (1.5): the stand-in game uses controllers; also PASS only when the game's own actions all worked and the layer's
 controller actions were attached beside them. --ctrl: CONTROL mode on from the start (the game's hands held).
+--game-only (1.6): the app's CONTROLLERS switch on "game only" (a settings.txt of the test's own, through APPDATA for the
+stand-in game alone); with --actions, PASS only when the game's actions all worked and the layer added none of its own.
 Exit 0 = every requested API passed.
 """
 import argparse
@@ -66,7 +68,10 @@ def run_one(api, args, env):
     if args.actions:
         acts = next((l for l in game.stdout.splitlines() if l.startswith("ACTIONS:")), "ACTIONS: none")
         checks["the game's own controller actions all worked"] = acts.startswith("ACTIONS: ok") and " syncs=0" not in acts
-        checks["the layer's controller actions attached beside them"] = int(got.get("pointer_ready", 0)) == 1
+        if args.game_only:
+            checks["the layer left the controllers to the game"] = int(got.get("pointer_ready", 0)) == -2
+        else:
+            checks["the layer's controller actions attached beside them"] = int(got.get("pointer_ready", 0)) == 1
     for name, ok in checks.items():
         print(("  ok   " if ok else "  FAIL ") + name)
     return all(checks.values())
@@ -84,6 +89,7 @@ def main():
     ap.add_argument("--room", action="store_true")
     ap.add_argument("--actions", action="store_true")
     ap.add_argument("--ctrl", action="store_true")
+    ap.add_argument("--game-only", action="store_true")
     args = ap.parse_args()
     if not args.loader:
         sys.exit("no openxr_loader.dll found; pass --loader")
@@ -94,6 +100,12 @@ def main():
             "implementation_version": "1", "description": "Window View (test)"}}, f)
     env = dict(os.environ, XR_RUNTIME_JSON=args.runtime, XR_API_LAYER_PATH=layer_dir, XR_ENABLE_API_LAYERS=LAYER_NAME,
                DISABLE_WINDOW_VIEW_LAYER="1")   # the installed copy (registered with Layer ON) stays out of the test
+    if args.game_only:   # the real settings.txt is never touched
+        appdata = tempfile.mkdtemp(prefix="windowview-appdata-")
+        os.makedirs(os.path.join(appdata, "WindowViewVR"))
+        with open(os.path.join(appdata, "WindowViewVR", "settings.txt"), "w") as f:
+            f.write("room=0\ncontrollers=0\n")
+        env["APPDATA"] = appdata
     apis = ["d3d11", "d3d12"] if args.api == "both" else [args.api]
     results = {api: run_one(api, args, env) for api in apis}
     print("RESULT: " + "  ".join("%s %s" % (k, "PASS" if v else "FAIL") for k, v in results.items()))

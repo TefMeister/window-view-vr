@@ -35,6 +35,28 @@ constexpr float kTriggerDown = 0.6f, kTriggerUp = 0.4f;   // the app uses the sa
 
 XrActionSet g_set = XR_NULL_HANDLE;
 bool g_actions_failed = false;
+bool g_actions_off = false;   // the app's CONTROLLERS switch says leave them to the game: no set, no bindings of ours
+
+// 1.6 (2026-10-27, Tefa in Village on Virtual Desktop: "with the window view on, my controller is not working"): the game
+// saw no controllers while ours were bound to the same buttons, so the app can leave them to the game. Read once, at the
+// game's first binding call, from the app's settings.txt ("controllers=0"); a change needs the game restarted.
+bool controllers_allowed() {
+    static int allowed = -1;
+    if (allowed >= 0) return allowed != 0;
+    allowed = 1;
+    wchar_t* appdata = nullptr; size_t n = 0;
+    if (_wdupenv_s(&appdata, &n, L"APPDATA") != 0 || appdata == nullptr) return true;
+    std::wstring path = std::wstring(appdata) + L"\\WindowViewVR\\settings.txt";
+    free(appdata);
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return true;
+    char buf[4096]{}; DWORD got = 0;
+    ReadFile(f, buf, sizeof(buf) - 1, &got, nullptr);
+    CloseHandle(f);
+    const char* at = strstr(buf, "controllers=");
+    if (at != nullptr && (at == buf || at[-1] == '\n') && at[12] == '0') allowed = 0;
+    return allowed != 0;
+}
 enum { A_LCLICK, A_RCLICK, A_TRIGGER, A_SQUEEZE, A_STICK, A_AIM, A_A, A_B, A_Y, A_LSQUEEZE, A_LSTICK, A_LAIM, A_X, A_COUNT };
 XrAction g_act[A_COUNT]{};
 
@@ -56,6 +78,7 @@ XrPath to_path(const char* s) {
 
 bool make_actions() {
     if (g_set != XR_NULL_HANDLE) return true;
+    if (!controllers_allowed()) { g_actions_off = true; return false; }
     if (g_actions_failed || g_instance == XR_NULL_HANDLE || g_next_create_action_set == nullptr || g_next_create_action == nullptr) return false;
     XrActionSetCreateInfo si{XR_TYPE_ACTION_SET_CREATE_INFO};
     strcpy_s(si.actionSetName, "flattovr_window_view");
@@ -320,7 +343,7 @@ bool aim_ray(Session& s, XrSession xs, XrAction aim, XrSpace& space, XrTime when
 
 // `room`: the windows are in the room around the anchor this frame (else they follow the head)
 void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime when, bool room) {
-    sh->pointer_ready = s.ours_attached ? 1 : (g_actions_failed ? -1 : 0);
+    sh->pointer_ready = s.ours_attached ? 1 : g_actions_failed ? -1 : g_actions_off ? -2 : 0;
     const bool now_on = sh->ctrl_mode != 0;
     if (now_on && !g_ctrl_was) InterlockedIncrement(&g_ctrl_gen);   // a fresh hold of the game's hands and buttons
     g_ctrl_was = now_on;

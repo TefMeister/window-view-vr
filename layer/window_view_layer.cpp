@@ -33,6 +33,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
 #include <type_traits>
 #include <vector>
 

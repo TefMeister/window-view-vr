@@ -32,7 +32,7 @@ class ViewUi : Form {
     readonly Shared shared = new Shared();
     readonly Desk desk = new Desk();
     readonly InputRouter input;
-    readonly Button layerBtn = new Button(), inputBtn = new Button(), addBtn = new Button(), roomBtn = new Button();
+    readonly Button layerBtn = new Button(), inputBtn = new Button(), addBtn = new Button(), roomBtn = new Button(), ctrlBtn = new Button();
     static readonly string SettingsFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowViewVR", "settings.txt");
     readonly FlowLayoutPanel rows = new FlowLayoutPanel();
     readonly Label status = new SkinLabel(), hint = new SkinLabel(), dropHint = new SkinLabel();
@@ -92,7 +92,11 @@ class ViewUi : Form {
         roomBtn.Height = 40;
         roomBtn.Click += delegate { SetRoom(!shared.RoomMode); };
         top.Controls.Add(roomBtn, 0, 1);
-        top.SetColumnSpan(roomBtn, 2);
+        // 1.6 (Tefa: "with the window view on, my controller is not working"): the controllers can be left to the game alone
+        Style(ctrlBtn, "");
+        ctrlBtn.Height = 40;
+        ctrlBtn.Click += delegate { SetControllers(ReadSetting("controllers") == "0"); };
+        top.Controls.Add(ctrlBtn, 1, 1);
         hint.Dock = DockStyle.Fill;
         hint.Text = "Switch the layer ON before the game starts. Drag a window by its dark header, resize it by its corner. " +
                     "With the mouse on the windows: F9 pushes the window under the cursor back, F10 pulls it in, F11 brings all of them in front of you. " +
@@ -153,6 +157,7 @@ class ViewUi : Form {
         FindMissingPaths();
         shared.RoomMode = ReadSetting("room") == "1";   // off unless it was switched on and saved
         ShowRoom();
+        ShowControllers();
         input.OnRecenter += delegate { shared.Recenter(); };
         shared.CtrlMode = false;   // the controllers start on the game
         pointer = new Pointer(shared, desk, input);
@@ -198,9 +203,21 @@ class ViewUi : Form {
         ShowRoom();
         Say(on ? "Windows now stay in the room. F11 (with the mouse on the windows) brings them back in front of you." : "Windows follow your head again.");
     }
+    // ---- 1.6: the controllers left to the game ----------------------------------------------------------------------
+    void SetControllers(bool on) {
+        WriteSetting("controllers", on ? "1" : "0");
+        ShowControllers();
+        Say(on ? "The controllers can work the windows again (left stick click). Restart the game for it to take effect."
+               : "The controllers are left to the game; the windows and the mouse still work. Restart the game for it to take effect.");
+    }
+    void ShowControllers() {
+        bool on = ReadSetting("controllers") != "0";
+        ctrlBtn.Text = on ? "CONTROLLERS: GAME + WINDOWS" : "CONTROLLERS: GAME ONLY";
+        ctrlBtn.BackColor = on ? OnColor : OffColor;
+    }
     void ShowRoom() {
         bool on = shared.RoomMode;
-        roomBtn.Text = on ? "WINDOWS: STAY IN THE ROOM   (click: follow my head)" : "WINDOWS: FOLLOW MY HEAD   (click: stay in the room)";
+        roomBtn.Text = on ? "WINDOWS: STAY IN THE ROOM" : "WINDOWS: FOLLOW MY HEAD";
         roomBtn.BackColor = on ? OnColor : OffColor;
     }
     static string ReadSetting(string key) {
@@ -498,6 +515,7 @@ class ViewUi : Form {
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         if (shared.GameConnected && shared.RoomMode) game += shared.AnchorSet ? ", windows in the room" : ", placing the windows...";
         if (shared.GameConnected) game += shared.PointerReady == 1 ? (shared.CtrlMode ? "\nCONTROLLERS ON THE WINDOWS: trigger clicks, grip carries, left stick click = back to the game" : "\nLeft stick click: the controllers work the windows")
+                                         : shared.PointerReady == -2 ? "\nControllers: left to the game"
                                          : shared.PointerReady < 0 ? "\n(the controllers could not be set up in this game)" : "";
         string err = shared.LastError != 0 ? "   last error " + shared.LastError : "";
         string where = "";

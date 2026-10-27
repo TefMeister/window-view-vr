@@ -65,7 +65,7 @@ struct WindowViewShared {
     float cursor_p[3];               // 520  app: its tip, in the desk's frame (the head's in follow mode, the anchor's in room mode)
     volatile LONG cursor_edge;       // 532  app: 1 = between windows (drawn yellow on the nearest edge)
     volatile LONG ctrl_mode;         // 536  layer (left stick clicked in) and app (its button): 1 = the controllers work the windows
-    volatile LONG pointer_ready;     // 540  layer: 1 = our controller actions are attached in the game, -1 = they could not be made
+    volatile LONG pointer_ready;     // 540  layer: 1 = our controller actions are attached in the game, -1 = they could not be made, -2 = left to the game
     volatile LONG ray_valid;         // 544  layer: 1 = the ray below is this frame's
     float ray_o[3];                  // 548  layer: the right controller's aim ray, in the desk's frame (metres)
     float ray_d[3];                  // 560  layer: ... its direction (unit)
