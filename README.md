@@ -1,7 +1,7 @@
 # Window View — see your desktop windows inside any OpenXR game, and use them with the mouse
 
-> ⚠️ **UNTESTED.** Built on 2026-10-16 and proven only on the OpenXR Simulator with a stand-in game, never yet in a real
-> headset or a real game. It may do nothing, show the window in the wrong place, or need a restart to let your mouse go.
+> 🔧 **Still being worked on, while already in use.** Worn in a real headset since 2026-10-24, in Resident Evil Village
+> (Visceral RE8) on Virtual Desktop, and tested on the OpenXR Simulator. Other games have not been tried yet.
 > Page Down always hands the mouse and keyboard back; closing the app does too.
 
 <img src="docs/app-window.png" width="420"> <img src="docs/vr-preview-notepad.png" width="420">
