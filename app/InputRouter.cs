@@ -164,6 +164,12 @@ class InputRouter : IDisposable {
         if ((GetKeyState((int)VK_CAPITAL) & 1) != 0) state[VK_CAPITAL] = 1;
         var buf = new System.Text.StringBuilder(8);
         int n = ToUnicode(vk, scanCode, state, buf, 8, 0);
+        if (ConsoleInput.IsTerminal(t)) {   // 1.7.1: Windows Terminal ignores posted keys; they go into its program's console
+            bool modifierOnly = vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || (vk >= 0xA0 && vk <= 0xA5);
+            if (down && !modifierOnly && !ConsoleInput.Type(t, vk, scanCode, n >= 1 ? buf[0] : '\0', extended, shift, ctrl, alt))
+                LastAction = "could not reach the program in the terminal";
+            return;
+        }
         bool printable = n >= 1 && buf[0] >= ' ' && !ctrl && !alt;
         if (printable) { if (down) PostMessage(t, WM_CHAR, new IntPtr(buf[0]), new IntPtr(lp)); return; }
         PostMessage(t, down ? (sys ? WM_SYSKEYDOWN : WM_KEYDOWN) : (sys ? WM_SYSKEYUP : WM_KEYUP), new IntPtr(vk), new IntPtr(lp));

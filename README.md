@@ -158,6 +158,13 @@ held 2 seconds it is a hold, counted in spare bits of the controller block that 
 home PC `[verified-numerically 2026-10-28, n=1]`: it builds; the installed app opened its window and the keyboard, and
 added the three rows; the Lanes row found the terminal window. Not yet tried in the headset.
 
+1.7.1, the same night (Tefa in the headset: *"still can't type into lanes in vr when it's not in focus, and even when in
+focus, i don't think the keyboard works"*): Windows Terminal ignores posted key messages, so for a terminal window the
+keys now go into the console of the program running in it (`app/ConsoleInput.cs`: attach for a moment, WriteConsoleInput,
+let go), the program whose console title is the window's title. Tested `[verified-numerically 2026-10-28, n=1]`: from a
+program without a console, 142 keys typed into a throwaway terminal window that never had the focus ran the command they
+spelled.
+
 ## Limits
 
 - **OpenXR games only**, drawing with **D3D11 or D3D12** (all RE Engine games do). Vulkan and OpenGL come later.
