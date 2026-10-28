@@ -72,7 +72,8 @@ struct WindowViewShared {
     float trigger;                   // 572  layer: right trigger 0..1
     float squeeze;                   // 576  layer: right grip 0..1
     float stick_y;                   // 580  layer: right stick up (+) / down (-)
-    volatile LONG buttons;           // 584  layer: 1 = A, 2 = Y (left; B on Index), 4 = B, 8 = X (left; A on Index)
+    volatile LONG buttons;           // 584  layer: 1 = A, 2 = Y (left; B on Index), 4 = B, 8 = X (left; A on Index);
+                                     //       1.7: bits 8..15 count the 2 s holds of the left stick (written every frame)
     volatile LONG ray_seq;           // 588  layer: +1 per frame with a ray
     // 1.5 (Tefa: "the ability to grab these windows with LG and RG, two windows at once as well one in left and one in right hand")
     volatile LONG lray_valid;        // 592  layer: 1 = the left ray below is this frame's

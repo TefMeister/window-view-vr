@@ -30,6 +30,7 @@ class InputRouter : IDisposable {
     IntPtr target = IntPtr.Zero, lastClicked = IntPtr.Zero;   // the control a button went down on; the last control clicked
     Placement dragging, sizing;
     public volatile string LastAction = "";
+    public static IntPtr KeyboardWindow = IntPtr.Zero;   // 1.7: Window View's own keyboard (KeysUi): clicking it never moves the typing target
 
     delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
     [StructLayout(LayoutKind.Sequential)] struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public IntPtr extra; }
@@ -45,6 +46,7 @@ class InputRouter : IDisposable {
     [DllImport("user32.dll")] static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT p, uint flags);
     [DllImport("user32.dll")] static extern int ToUnicode(uint vk, uint scan, byte[] state, [Out, MarshalAs(UnmanagedType.LPWStr, SizeConst = 8)] System.Text.StringBuilder buf, int size, uint flags);
     [DllImport("user32.dll")] static extern short GetKeyState(int vk);
+    [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
     const int WH_KEYBOARD_LL = 13, WH_MOUSE_LL = 14;
     const uint WM_QUIT = 0x12, WM_KEYDOWN = 0x100, WM_KEYUP = 0x101, WM_CHAR = 0x102, WM_SYSKEYDOWN = 0x104, WM_SYSKEYUP = 0x105;
     const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONDOWN = 0x201, WM_LBUTTONUP = 0x202, WM_RBUTTONDOWN = 0x204, WM_RBUTTONUP = 0x205,
@@ -133,9 +135,25 @@ class InputRouter : IDisposable {
         if (k.vkCode == VK_SHIFT || k.vkCode == 0xA0 || k.vkCode == 0xA1) shift = down;
         if (k.vkCode == VK_CONTROL || k.vkCode == 0xA2 || k.vkCode == 0xA3) ctrl = down;
         if (k.vkCode == VK_MENU || k.vkCode == 0xA4 || k.vkCode == 0xA5) alt = down;
+        SendKey(k.vkCode, k.scanCode, (k.flags & LLKHF_EXTENDED) != 0, down, sys);
+    }
+    // 1.7: a key from Window View's own keyboard (KeysUi), pressed and let go, with Shift / Ctrl for this key only
+    public void TypeKey(uint vk, bool withShift, bool withCtrl) {
+        lock (gate) {
+            bool s0 = shift, c0 = ctrl;
+            shift = s0 || withShift; ctrl = c0 || withCtrl;
+            uint scan = MapVirtualKey(vk, 0);   // MAPVK_VK_TO_VSC
+            bool ext = vk >= 0x21 && vk <= 0x2E;   // Page Up .. Delete: arrows, Home, End, Insert, Delete are extended keys
+            SendKey(vk, scan, ext, true, false);
+            SendKey(vk, scan, ext, false, false);
+            shift = s0; ctrl = c0;
+            LastAction = "typed from the keyboard window";
+        }
+    }
+    void SendKey(uint vk, uint scanCode, bool extended, bool down, bool sys) {
         IntPtr t = KeyTarget();
         if (t == IntPtr.Zero) return;
-        uint lp = 1u | (k.scanCode << 16) | ((k.flags & LLKHF_EXTENDED) != 0 ? 1u << 24 : 0) | (down ? 0u : 0xC0000000u);
+        uint lp = 1u | (scanCode << 16) | (extended ? 1u << 24 : 0) | (down ? 0u : 0xC0000000u);
         // A letter goes as ONE WM_CHAR (the window's own message loop would make a second one out of a WM_KEYDOWN, as
         // Notepad did in the first test: "hheelllloo"); everything else (Enter, Backspace, arrows, Tab, Escape, Ctrl and
         // Alt combinations) goes as the key itself, and the window's loop turns it into the character it wants.
@@ -145,18 +163,20 @@ class InputRouter : IDisposable {
         if (alt) state[VK_MENU] = 0x80;
         if ((GetKeyState((int)VK_CAPITAL) & 1) != 0) state[VK_CAPITAL] = 1;
         var buf = new System.Text.StringBuilder(8);
-        int n = ToUnicode(k.vkCode, k.scanCode, state, buf, 8, 0);
+        int n = ToUnicode(vk, scanCode, state, buf, 8, 0);
         bool printable = n >= 1 && buf[0] >= ' ' && !ctrl && !alt;
         if (printable) { if (down) PostMessage(t, WM_CHAR, new IntPtr(buf[0]), new IntPtr(lp)); return; }
-        PostMessage(t, down ? (sys ? WM_SYSKEYDOWN : WM_KEYDOWN) : (sys ? WM_SYSKEYUP : WM_KEYUP), new IntPtr(k.vkCode), new IntPtr(lp));
+        PostMessage(t, down ? (sys ? WM_SYSKEYDOWN : WM_KEYDOWN) : (sys ? WM_SYSKEYUP : WM_KEYUP), new IntPtr(vk), new IntPtr(lp));
     }
-    // keys go to the control last clicked, else to the window under the cursor, else to the top window
+    // keys go to the control last clicked, else to the window under the cursor, else to the top window (never to the
+    // keyboard window itself, 1.7)
     IntPtr KeyTarget() {
         if (lastClicked != IntPtr.Zero && Native.IsWindow(lastClicked)) return lastClicked;
         lock (desk.Lock) {
             var hit = desk.HitTest(desk.CursorX, desk.CursorY);
-            if (hit.P != null) return hit.P.Hwnd;
-            for (int i = desk.Windows.Count - 1; i >= 0; --i) if (desk.Windows[i].Live && desk.Windows[i].Shown) return desk.Windows[i].Hwnd;
+            if (hit.P != null && hit.P.Hwnd != KeyboardWindow) return hit.P.Hwnd;
+            for (int i = desk.Windows.Count - 1; i >= 0; --i)
+                if (desk.Windows[i].Live && desk.Windows[i].Shown && desk.Windows[i].Hwnd != KeyboardWindow) return desk.Windows[i].Hwnd;
         }
         return IntPtr.Zero;
     }
@@ -269,7 +289,7 @@ class InputRouter : IDisposable {
                 POINT c;
                 target = ChildAt(hit.P.Hwnd, ScreenPoint(hit.P, hit.ClientX, hit.ClientY), out c);
                 heldPlacement = hit.P;
-                lastClicked = target;
+                if (hit.P.Hwnd != KeyboardWindow) lastClicked = target;   // 1.7: a key of the keyboard window keeps the typing target
                 PostMessage(target, msg, new IntPtr(Keys()), Lp(c.X, c.Y));
                 LastAction = "clicked in " + hit.P.Title;
             } else PostToTarget(msg, hit);

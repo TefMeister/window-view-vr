@@ -9,6 +9,12 @@
 // shortcut); if it is not running it is started; its window joins the headset as soon as it opens, and again whenever the
 // app is opened later. Each row shows the app's own icon ("could these have the actual app icon added to them"). The
 // sliders are drawn by the app (Skin.cs), and the background is the Window View icon pixelated in the Lanes theme's style.
+//
+// 1.7 (2026-10-28, Tefa: "can you make the in-vr keyboard, window view itself and the Lanes window show up in VR headset,
+// while the window view is on. hold Lthumb for 2 seconds to make window view window in the headset to appear/dissapear"):
+// three rows are always there, with a Show box and no REMOVE: this window, its own keyboard (KeysUi.cs) and Lanes (the
+// Windows Terminal window; its desktop shortcut starts wt.exe, whose window belongs to WindowsTerminal.exe, so an app
+// added by that shortcut never found its window). Holding the left stick in for 2 s shows or hides this window in VR.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -41,6 +47,9 @@ class ViewUi : Form {
     static readonly ConcurrentDictionary<string, string> names = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     Thread captureThread;
     Pointer pointer;   // 1.5: the smooth pointer and the controllers (Pointer.cs)
+    KeysUi keys;       // 1.7: Window View's own keyboard
+    int lastSelfToggles = -1;
+    const string SELF_TITLE = "Window View", LANES_EXE = "WindowsTerminal.exe";
     volatile bool running = true;
     int lastRelink, messageAt = -MESSAGE_HOLD_MS;
 
@@ -58,7 +67,7 @@ class ViewUi : Form {
 
     public ViewUi() {
         input = new InputRouter(desk);
-        Text = "Window View";
+        Text = SELF_TITLE;
         ClientSize = new Size(580, 640);
         MinimumSize = new Size(500, 420);
         Font = new Font("Segoe UI", 9.5f);
@@ -100,7 +109,8 @@ class ViewUi : Form {
         hint.Dock = DockStyle.Fill;
         hint.Text = "Switch the layer ON before the game starts. Drag a window by its dark header, resize it by its corner. " +
                     "With the mouse on the windows: F9 pushes the window under the cursor back, F10 pulls it in, F11 brings all of them in front of you. " +
-                    "Left stick click: the controllers work the windows (trigger = click, grip = carry, stick = scroll, Y = bring them in front); click it again for the game.";
+                    "Left stick click: the controllers work the windows (trigger = click, grip = carry, stick = scroll, Y = bring them in front); click it again for the game. " +
+                    "Hold the left stick in for 2 seconds: this window appears or disappears in the headset.";
         hint.ForeColor = Dim;
         top.Controls.Add(hint, 0, 2);
         top.SetColumnSpan(hint, 2);
@@ -154,6 +164,7 @@ class ViewUi : Form {
         foreach (Control c in Controls) DropTargets(c);   // a drop lands wherever the mouse is, on a button or a row too
 
         desk.Load();
+        EnsureBuiltins();
         FindMissingPaths();
         shared.RoomMode = ReadSetting("room") == "1";   // off unless it was switched on and saved
         ShowRoom();
@@ -163,6 +174,8 @@ class ViewUi : Form {
         pointer = new Pointer(shared, desk, input);
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
         input.Start();
+        keys = new KeysUi(input);
+        Shown += delegate { keys.Show(); InputRouter.KeyboardWindow = keys.Handle; Relink(); };
         Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
         ShowLayer();
         ShowInput();
@@ -235,6 +248,7 @@ class ViewUi : Form {
         running = false;
         uiTimer.Stop();
         if (pointer != null) pointer.Dispose();
+        if (keys != null) { keys.AllowClose = true; keys.Close(); InputRouter.KeyboardWindow = IntPtr.Zero; }
         shared.CtrlMode = false;  // the game gets its controllers back
         input.Dispose();          // the mouse and keyboard always come back
         if (captureThread != null) captureThread.Join(1000);
@@ -262,7 +276,7 @@ class ViewUi : Form {
             return;
         }
         if (string.Equals(Path.GetFileName(exe), Path.GetFileName(Application.ExecutablePath), StringComparison.OrdinalIgnoreCase)) {
-            Say("Window View cannot show itself in VR.");
+            Say("Window View and its keyboard are always in the list (their Show boxes put them in VR).");
             return;
         }
         string name = Path.GetFileName(exe);
@@ -322,6 +336,7 @@ class ViewUi : Form {
     // "GrabZones" -> "Grab Zones": an exe with no name inside it still reads as words
     static string Spaced(string s) { return System.Text.RegularExpressions.Regex.Replace(s, "(?<=[a-z])(?=[A-Z])", " "); }
     static string AppName(Placement p) {
+        if (IsLanes(p)) return "Lanes (Windows Terminal)";
         if (p.Title != "") return p.Title;                              // a row from before v1.3 keeps the name it was given
         if (p.Path != "" && File.Exists(p.Path)) return FriendlyName(p.Path);
         return Spaced(Path.GetFileNameWithoutExtension(p.Exe));
@@ -355,6 +370,42 @@ class ViewUi : Form {
         }
     }
 
+    // ---- 1.7: the rows that are always there ---------------------------------------------------------------------
+    static string MyExe { get { return Path.GetFileName(Application.ExecutablePath); } }
+    static bool IsLanes(Placement p) { return string.Equals(p.Exe, LANES_EXE, StringComparison.OrdinalIgnoreCase) && p.Title == ""; }
+    static bool IsBuiltin(Placement p) {
+        return IsLanes(p) || (string.Equals(p.Exe, MyExe, StringComparison.OrdinalIgnoreCase) && (p.Title == SELF_TITLE || p.Title == KeysUi.TITLE));
+    }
+    void EnsureBuiltins() {
+        lock (desk.Lock) {
+            bool added = Ensure(MyExe, SELF_TITLE, Application.ExecutablePath) | Ensure(MyExe, KeysUi.TITLE, Application.ExecutablePath) | Ensure(LANES_EXE, "", "");
+            if (added) desk.Save();
+        }
+    }
+    bool Ensure(string exe, string title, string path) {
+        foreach (var p in desk.Windows) if (string.Equals(p.Exe, exe, StringComparison.OrdinalIgnoreCase) && p.Title == title) return false;
+        if (desk.FreeSlot() < 0) return false;
+        desk.Add(IntPtr.Zero, exe, title, path);
+        return true;
+    }
+    // the left stick held in for 2 s (counted by the layer): this window in or out of the headset
+    void WatchSelfToggle() {
+        int t = shared.SelfToggles;
+        if (lastSelfToggles < 0 || !shared.GameConnected) { lastSelfToggles = t; return; }
+        if (t == lastSelfToggles) return;
+        lastSelfToggles = t;
+        Placement self = null;
+        lock (desk.Lock) {
+            foreach (var p in desk.Windows) if (string.Equals(p.Exe, MyExe, StringComparison.OrdinalIgnoreCase) && p.Title == SELF_TITLE) self = p;
+            if (self == null) return;
+            self.Shown = !self.Shown;
+            if (!self.Shown) shared.Hide(self.Slot);
+            desk.Save();
+        }
+        RebuildRows();
+        Say(self.Shown ? "Window View is in the headset (left stick held 2 s)." : "Window View is out of the headset (left stick held 2 s).");
+    }
+
     // ---- the open windows, to link the added apps to ----------------------------------------------------------------
     List<OpenWindow> ListOpen() {
         var list = new List<OpenWindow>();
@@ -363,10 +414,10 @@ class ViewUi : Form {
             if (!IsWindowVisible(hwnd) || GetWindowTextLength(hwnd) == 0 || (GetWindowLong(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0) return true;
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
-            if (pid == me) return true;
             var sb = new StringBuilder(256);
             GetWindowText(hwnd, sb, 256);
             string title = sb.ToString();
+            if (pid == me && title != SELF_TITLE && title != KeysUi.TITLE) return true;   // 1.7: of our own, only this window and the keyboard
             if (title == "Program Manager" || title == "Windows Input Experience" || title == "Settings") return true;
             var w = new OpenWindow();
             w.Hwnd = hwnd;
@@ -501,17 +552,20 @@ class ViewUi : Form {
         shown.Text = "Show"; shown.Checked = p.Shown; shown.Dock = DockStyle.Fill; shown.BackColor = Color.Transparent;
         shown.CheckedChanged += delegate { lock (desk.Lock) { p.Shown = shown.Checked; if (!p.Shown) shared.Hide(p.Slot); desk.Save(); } };
         panel.Controls.Add(shown, 4, 0);
-        var remove = new Button();
-        Style(remove, "REMOVE");
-        remove.Click += delegate { lock (desk.Lock) { desk.Remove(p); shared.Hide(p.Slot); desk.Save(); } RebuildRows(); };
-        panel.Controls.Add(remove, 5, 0);
-        panel.SetRowSpan(remove, 2);
+        if (!IsBuiltin(p)) {   // 1.7: the three built-in rows stay; their Show box takes them out of VR
+            var remove = new Button();
+            Style(remove, "REMOVE");
+            remove.Click += delegate { lock (desk.Lock) { desk.Remove(p); shared.Hide(p.Slot); desk.Save(); } RebuildRows(); };
+            panel.Controls.Add(remove, 5, 0);
+            panel.SetRowSpan(remove, 2);
+        }
         return panel;
     }
 
     // ---- every half second ---------------------------------------------------------------------------------------
     void Tick() {
         if (Environment.TickCount - lastRelink > 1000) { lastRelink = Environment.TickCount; Relink(); }
+        WatchSelfToggle();
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         if (shared.GameConnected && shared.RoomMode) game += shared.AnchorSet ? ", windows in the room" : ", placing the windows...";
         if (shared.GameConnected) game += shared.PointerReady == 1 ? (shared.CtrlMode ? "\nCONTROLLERS ON THE WINDOWS: trigger clicks, grip carries, left stick click = back to the game" : "\nLeft stick click: the controllers work the windows")

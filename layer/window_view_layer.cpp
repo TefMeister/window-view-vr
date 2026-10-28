@@ -89,6 +89,9 @@ struct Session {
     // 1.5
     bool ours_attached = false;            // our controller action set is attached beside the game's
     bool both_was = false;                 // the left stick was in last frame (the CONTROL switch fires once per press)
+    ULONGLONG lclick_since = 0;            // 1.7: when the left stick went in
+    bool lclick_held = false;              // 1.7: this press already reached the 2 s hold
+    LONG self_toggles = 0;                 // 1.7: holds so far (mod 256), reported in bits 8..15 of `buttons`
     XrSpace aim_space = XR_NULL_HANDLE;    // the right controller's aim pose
     XrSpace left_aim_space = XR_NULL_HANDLE;   // the left controller's (it carries windows too)
     Quad cursor[2];                        // the pointer: white over a window, yellow between windows

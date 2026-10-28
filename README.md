@@ -54,6 +54,10 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
 8. Optional (1.6): **CONTROLLERS: GAME ONLY** leaves the controllers to the game alone: the windows and the mouse still
    work, the left stick click does nothing for Window View. Use it when the game stops seeing your controllers with Window
    View on (seen once in Village on Virtual Desktop, 2026-10-27). Takes effect at the next game start.
+9. New in 1.7: three rows are always in the list. **Window View** itself, its own **Keyboard** and **Lanes** (the Windows
+   Terminal window). Each has a Show box; they have no REMOVE. **Hold the left stick in for 2 seconds** to show or hide
+   the Window View window in the headset; a short click still switches the controllers. The keyboard types into the
+   window you last clicked: point at a key and pull the trigger. Shift and Ctrl hold for the next key only.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
@@ -142,6 +146,17 @@ cause `[hypothesis]`: the runtime gives each button to one action, and ours (bou
 no action set and no bindings at all. Tested `[verified-numerically 2026-10-27, n=1 each]`: `view_test.py both --actions
 --game-only` PASS (the game's actions all work, the windows still show, the layer reports "left to the game"), and the
 default `--actions` still PASS. Not yet tried in the headset.
+
+1.7, 2026-10-28 (Tefa: *"can you make the in-vr keyboard, window view itself and the Lanes window show up in VR headset,
+while the window view is on. hold Lthumb for 2 seconds to make window view window in the headset to appear/dissapear"*,
+and for the keyboard *"something i can use to type stuff into the windows that window view puts inside the headset"*):
+Window View's own window and a new keyboard window (`app/KeysUi.cs`) can be shown in the headset, and Lanes too. The
+Lanes desktop shortcut starts `wt.exe`, whose window belongs to `WindowsTerminal.exe`, so before this it never found its
+window; its row now looks for any Windows Terminal window. The Windows on-screen keyboard was no use here: it types into
+the focused window, and the game keeps the focus. The left stick now counts a click when it is let go before 2 seconds;
+held 2 seconds it is a hold, counted in spare bits of the controller block that Hand Poser does not read. Tested on the
+home PC `[verified-numerically 2026-10-28, n=1]`: it builds; the installed app opened its window and the keyboard, and
+added the three rows; the Lanes row found the terminal window. Not yet tried in the headset.
 
 ## Limits
 
