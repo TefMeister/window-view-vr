@@ -102,7 +102,7 @@ class Shared : IDisposable {
         buttons = view.ReadInt32(BUTTONS);
         return view.ReadInt32(RAY_VALID) != 0;
     }
-    // 1.7: how many times the left stick has been held in for 2 s (mod 256; the layer writes it every frame)
+    // 1.7: how many times the left stick has been held in for the hold time (mod 256; the layer writes it every frame)
     public int SelfToggles { get { return (view.ReadInt32(BUTTONS) >> 8) & 0xFF; } }
     // another app (Hand Poser's nudge) is using X / Y / A / B and the grips right now
     public bool ButtonsClaimed { get { ulong c = view.ReadUInt64(BUTTON_CLAIM); return c != 0 && GetTickCount64() - c < 500; } }

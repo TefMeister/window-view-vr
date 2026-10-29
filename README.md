@@ -55,7 +55,7 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    work, the left stick click does nothing for Window View. Use it when the game stops seeing your controllers with Window
    View on (seen once in Village on Virtual Desktop, 2026-10-27). Takes effect at the next game start.
 9. New in 1.7: three rows are always in the list. **Window View** itself, its own **Keyboard** and **Lanes** (the Windows
-   Terminal window). Each has a Show box; they have no REMOVE. **Hold the left stick in for 2 seconds** to show or hide
+   Terminal window). Each has a Show box; they have no REMOVE. **Hold the left stick in for half a second** to show or hide
    the Window View window in the headset; a short click still switches the controllers. The keyboard types into the
    window you last clicked: point at a key and pull the trigger. Shift and Ctrl hold for the next key only.
 
@@ -164,6 +164,10 @@ keys now go into the console of the program running in it (`app/ConsoleInput.cs`
 let go), the program whose console title is the window's title. Tested `[verified-numerically 2026-10-28, n=1]`: from a
 program without a console, 142 keys typed into a throwaway terminal window that never had the focus ran the command they
 spelled.
+
+1.7.2, 2026-10-29 (Tefa: *"2 seconds is so long"*): the left stick hold that shows or hides Window View's own window
+is half a second now. A shorter press is still a click (the controller mode switch). Builds; not yet tried in the
+headset.
 
 ## Limits
 

@@ -31,7 +31,8 @@ PFN_xrDestroySpace g_next_destroy_space = nullptr;
 PFN_xrLocateSpaces g_next_locate_spaces = nullptr;
 PFN_xrLocateSpacesKHR g_next_locate_spaces_khr = nullptr;
 
-constexpr ULONGLONG kSelfHoldMs = 2000;   // 1.7: holding the left stick in this long shows or hides Window View's own window
+constexpr ULONGLONG kSelfHoldMs = 500;    // holding the left stick in this long shows or hides Window View's own window (1.7: 2 s;
+                                           // 1.7.2, 2026-10-29, Tefa: "2 seconds is so long", half a second now)
 constexpr float kTriggerDown = 0.6f, kTriggerUp = 0.4f;   // the app uses the same hysteresis; the layer only reports values
 
 XrActionSet g_set = XR_NULL_HANDLE;
