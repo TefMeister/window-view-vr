@@ -483,7 +483,20 @@ class ViewUi : Form {
         foreach (var p in list) { var row = Row(p); DropTargets(row); rows.Controls.Add(row); }
         rows.ResumeLayout();
         ShowRowStates();
+        FitRows();
         rows.Invalidate(true);
+    }
+    // 1.8 (Tefa 2026-10-30: "window view should display all the windows it has in it, so it automatically scales longer, instead of
+    // having to scroll down"): the window grows or shrinks to show every row, up to the screen's height (then it scrolls)
+    void FitRows() {
+        if (WindowState != FormWindowState.Normal) return;
+        int need = rows.Padding.Vertical;
+        foreach (Control c in rows.Controls) need += c.Height + c.Margin.Vertical;
+        int h = ClientSize.Height - rows.ClientSize.Height + need;
+        int max = Screen.FromControl(this).WorkingArea.Height - (Height - ClientSize.Height);
+        h = Math.Min(h, max);
+        if (h != ClientSize.Height) ClientSize = new Size(ClientSize.Width, h);
+        if (Bottom > Screen.FromControl(this).WorkingArea.Bottom) Top = Math.Max(Screen.FromControl(this).WorkingArea.Top, Screen.FromControl(this).WorkingArea.Bottom - Height);
     }
     void ShowRowStates() {
         lock (desk.Lock) {

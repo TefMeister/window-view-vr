@@ -173,7 +173,9 @@ headset.
 clicking them does nothing"*): pulling the trigger tilts the controller, so the pointer slid off a small key or tick between
 press and release and the click was lost. Now the pointer holds still from the first touch of the trigger until the ray
 moves more than 14 picture pixels (then it follows, so sliders still drag); the keyboard's keys type on the press, not the
-release; and the Show tick is a big SHOWN / HIDDEN button that switches on the press. Builds; not yet tried in the headset.
+release; and the Show tick is a big SHOWN / HIDDEN button that switches on the press. Builds; not yet tried in the headset. The same day: the
+window grows to show every row of its list instead of scrolling (up to the screen's height; Tefa: *"so it automatically scales
+longer, instead of having to scroll down"*).
 
 ## Limits
 
