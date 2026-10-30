@@ -233,7 +233,6 @@ class InputRouter : IDisposable {
     public void PointerLeft(bool down) { lock (gate) Button(down ? WM_LBUTTONDOWN : WM_LBUTTONUP); }
     public void PointerRight(bool down) { lock (gate) Button(down ? WM_RBUTTONDOWN : WM_RBUTTONUP); }
     public void PointerWheel(int delta) { lock (gate) Wheel(WM_MOUSEWHEEL, (short)delta); }
-    public void PointerGrab(bool on) { lock (gate) { if (!on) { target = IntPtr.Zero; buttonsHeld = 0; } } }
     void Move(int dx, int dy) { lock (gate) MoveCore(() => desk.MoveCursor(dx, dy)); }
     void MoveCore(Action place) {
         Hit hit;
