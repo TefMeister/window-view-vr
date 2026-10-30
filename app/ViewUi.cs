@@ -503,8 +503,8 @@ class ViewUi : Form {
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 46));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));   // 1.8: the Size slider on its own (it spanned the Show column)
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));    // 1.8: the big SHOWN / HIDDEN button, both rows
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
@@ -547,11 +547,19 @@ class ViewUi : Form {
         var sizeLabel = new SkinLabel(); sizeLabel.Text = "Size"; sizeLabel.ForeColor = Dim; sizeLabel.Dock = DockStyle.Fill; sizeLabel.TextAlign = ContentAlignment.MiddleCenter;
         panel.Controls.Add(sizeLabel, 3, 0);
         panel.Controls.Add(size, 3, 1);
-        panel.SetColumnSpan(size, 2);
-        var shown = new CheckBox();
-        shown.Text = "Show"; shown.Checked = p.Shown; shown.Dock = DockStyle.Fill; shown.BackColor = Color.Transparent;
-        shown.CheckedChanged += delegate { lock (desk.Lock) { p.Shown = shown.Checked; if (!p.Shown) shared.Hide(p.Slot); desk.Save(); } };
+        // 1.8: a big SHOWN / HIDDEN button in place of the small Show tick (Tefa 2026-10-30: "these tick marks are too small and
+        // don't work, clicking them does nothing"); it switches on the press, so a release that slid off it still counts
+        var shown = new Button();
+        Style(shown, "");
+        Action paintShown = () => { shown.Text = p.Shown ? "SHOWN" : "HIDDEN"; shown.BackColor = p.Shown ? OnColor : OffColor; };
+        paintShown();
+        shown.MouseDown += (o, e) => {
+            if (e.Button != MouseButtons.Left) return;
+            lock (desk.Lock) { p.Shown = !p.Shown; if (!p.Shown) shared.Hide(p.Slot); desk.Save(); }
+            paintShown();
+        };
         panel.Controls.Add(shown, 4, 0);
+        panel.SetRowSpan(shown, 2);
         if (!IsBuiltin(p)) {   // 1.7: the three built-in rows stay; their Show box takes them out of VR
             var remove = new Button();
             Style(remove, "REMOVE");

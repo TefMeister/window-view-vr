@@ -67,9 +67,13 @@ class KeysUi : Form {
                 b.Text = k.Shifted != null && k.Plain.Length == 1 && !char.IsLetter(k.Plain[0]) ? k.Plain + "  " + k.Shifted : k.Plain;
                 if (k.Shifted != null && char.IsLetter(k.Plain[0])) letters.Add(new KeyValuePair<Button, string[]>(b, new[] { k.Plain, k.Shifted }));
                 var key = k;
-                if (k.Vk == VK_SHIFT) { shiftKey = b; b.Click += delegate { shift = !shift; ShowMods(); }; }
-                else if (k.Vk == VK_CONTROL) { ctrlKey = b; b.Click += delegate { ctrl = !ctrl; ShowMods(); }; }
-                else b.Click += delegate { Press(key.Vk); };
+                // 1.8: a key types the moment it is pressed, not on release (Tefa 2026-10-30: "the keyboard does not register
+                // some presses"): a release that slid off the key no longer loses it
+                MouseEventHandler down;
+                if (k.Vk == VK_SHIFT) { shiftKey = b; down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { shift = !shift; ShowMods(); } }; }
+                else if (k.Vk == VK_CONTROL) { ctrlKey = b; down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { ctrl = !ctrl; ShowMods(); } }; }
+                else down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Press(key.Vk); };
+                b.MouseDown += down;
                 Controls.Add(b);
                 x += w + GAP;
             }

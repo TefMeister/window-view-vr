@@ -169,6 +169,12 @@ spelled.
 is half a second now. A shorter press is still a click (the controller mode switch). Builds; not yet tried in the
 headset.
 
+1.8, 2026-10-30 (Tefa: *"the keyboard does not register some presses"* and the Show ticks *"are too small and don't work,
+clicking them does nothing"*): pulling the trigger tilts the controller, so the pointer slid off a small key or tick between
+press and release and the click was lost. Now the pointer holds still from the first touch of the trigger until the ray
+moves more than 14 picture pixels (then it follows, so sliders still drag); the keyboard's keys type on the press, not the
+release; and the Show tick is a big SHOWN / HIDDEN button that switches on the press. Builds; not yet tried in the headset.
+
 ## Limits
 
 - **OpenXR games only**, drawing with **D3D11 or D3D12** (all RE Engine games do). Vulkan and OpenGL come later.

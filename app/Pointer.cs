@@ -69,6 +69,11 @@ class Carry {
 class Pointer : IDisposable {
     const int LOOP_MS = 4;
     const float TRIGGER_DOWN = 0.6f, TRIGGER_UP = 0.4f, GRIP_DOWN = 0.6f, GRIP_UP = 0.4f;
+    // 1.8 (Tefa 2026-10-30: "the keyboard does not register some presses", the Show ticks "don't work"): pulling the trigger
+    // tilts the controller, so the pointer slid off a small key or tick between press and release and the click was lost.
+    // From the first touch of the trigger the pointer holds still; it follows again only once the ray has moved more than
+    // CLICK_SLOP_PX picture pixels from where it was held (a slider drag), or the trigger is let go.
+    const float TRIGGER_TOUCH = 0.12f, CLICK_SLOP_PX = 14f;
     const float STICK_DEAD = 0.25f, WHEEL_NOTCHES_PER_S = 8f, DEPTH_PER_S = 1.6f;   // full stick: 8 wheel notches a second / depth x1.6 a second
     readonly Shared shared;
     readonly Desk desk;
@@ -76,6 +81,7 @@ class Pointer : IDisposable {
     readonly Thread thread;
     volatile bool running = true;
     bool trigger, a, y;
+    bool held; Placement heldOn; float heldX, heldY;   // 1.8: the pointer held still for a click
     float wheel;
     int lastSeq = -1, lastTick = Environment.TickCount;
     readonly Carry right = new Carry(), left = new Carry();   // either hand carries a window, both at once
@@ -170,9 +176,14 @@ class Pointer : IDisposable {
             else hover = Under(o, d, distance, room, null, out hu, out hv);
         }
         if (hover != null) {
-            float cx, cy;
-            lock (desk.Lock) { cx = hover.Left + hu * hover.PicW * hover.Seen; cy = hover.Top - hv * hover.PicH * hover.Seen; }
-            input.PointerTo(cx, cy);
+            float cx, cy, seen;
+            lock (desk.Lock) { cx = hover.Left + hu * hover.PicW * hover.Seen; cy = hover.Top - hv * hover.PicH * hover.Seen; seen = hover.Seen; }
+            bool touch = right.Window == null && trig > TRIGGER_TOUCH;
+            if (!touch) { held = false; heldOn = null; }
+            else if (!held) { held = true; heldOn = hover; heldX = cx; heldY = cy; }   // the first touch: hold here
+            if (held && heldOn == hover && seen > 0 && Math.Sqrt((cx - heldX) * (cx - heldX) + (cy - heldY) * (cy - heldY)) / seen < CLICK_SLOP_PX)
+                input.PointerTo(heldX, heldY);
+            else { if (held) heldOn = null; input.PointerTo(cx, cy); }   // moved past the slop: follow (a drag), until the trigger is let go
         }
         if (right.Window != null) return;   // while the right hand carries, its trigger and stick neither click nor scroll
         bool tNow = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;   // trigger: the left button (held = drag a slider)
