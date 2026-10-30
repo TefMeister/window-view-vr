@@ -14,7 +14,7 @@
 // while the window view is on. hold Lthumb for 2 seconds to make window view window in the headset to appear/dissapear"):
 // three rows are always there, with a Show box and no REMOVE: this window, its own keyboard (KeysUi.cs) and Lanes (the
 // Windows Terminal window; its desktop shortcut starts wt.exe, whose window belongs to WindowsTerminal.exe, so an app
-// added by that shortcut never found its window). Holding the left stick in for half a second (2 s before 1.7.2) shows or hides this window in VR.
+// added by that shortcut never found its window). (1.9: the left-stick hold that showed or hid this window is gone.)
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -48,7 +48,6 @@ class ViewUi : Form {
     Thread captureThread;
     Pointer pointer;   // 1.5: the smooth pointer and the controllers (Pointer.cs)
     KeysUi keys;       // 1.7: Window View's own keyboard
-    int lastSelfToggles = -1;
     const string SELF_TITLE = "Window View", LANES_EXE = "WindowsTerminal.exe";
     volatile bool running = true;
     int lastRelink, messageAt = -MESSAGE_HOLD_MS;
@@ -109,8 +108,7 @@ class ViewUi : Form {
         hint.Dock = DockStyle.Fill;
         hint.Text = "Switch the layer ON before the game starts. Drag a window by its dark header, resize it by its corner. " +
                     "With the mouse on the windows: F9 pushes the window under the cursor back, F10 pulls it in, F11 brings all of them in front of you. " +
-                    "Left stick click: the controllers work the windows (trigger = click, grip = carry, stick = scroll, Y = bring them in front); click it again for the game. " +
-                    "Hold the left stick in for half a second: this window appears or disappears in the headset.";
+                    "Left stick click: the controllers work the windows (trigger = click, grip = carry, stick = scroll, Y = bring them in front); click it again for the game. ";
         hint.ForeColor = Dim;
         top.Controls.Add(hint, 0, 2);
         top.SetColumnSpan(hint, 2);
@@ -388,24 +386,6 @@ class ViewUi : Form {
         desk.Add(IntPtr.Zero, exe, title, path);
         return true;
     }
-    // the left stick held in for half a second (counted by the layer): this window in or out of the headset
-    void WatchSelfToggle() {
-        int t = shared.SelfToggles;
-        if (lastSelfToggles < 0 || !shared.GameConnected) { lastSelfToggles = t; return; }
-        if (t == lastSelfToggles) return;
-        lastSelfToggles = t;
-        Placement self = null;
-        lock (desk.Lock) {
-            foreach (var p in desk.Windows) if (string.Equals(p.Exe, MyExe, StringComparison.OrdinalIgnoreCase) && p.Title == SELF_TITLE) self = p;
-            if (self == null) return;
-            self.Shown = !self.Shown;
-            if (!self.Shown) shared.Hide(self.Slot);
-            desk.Save();
-        }
-        RebuildRows();
-        Say(self.Shown ? "Window View is in the headset (left stick held)." : "Window View is out of the headset (left stick held).");
-    }
-
     // ---- the open windows, to link the added apps to ----------------------------------------------------------------
     List<OpenWindow> ListOpen() {
         var list = new List<OpenWindow>();
@@ -586,7 +566,6 @@ class ViewUi : Form {
     // ---- every half second ---------------------------------------------------------------------------------------
     void Tick() {
         if (Environment.TickCount - lastRelink > 1000) { lastRelink = Environment.TickCount; Relink(); }
-        WatchSelfToggle();
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         if (shared.GameConnected && shared.RoomMode) game += shared.AnchorSet ? ", windows in the room" : ", placing the windows...";
         if (shared.GameConnected) game += shared.PointerReady == 1 ? (shared.CtrlMode ? "\nCONTROLLERS ON THE WINDOWS: trigger clicks, grip carries, left stick click = back to the game" : "\nLeft stick click: the controllers work the windows")
@@ -635,7 +614,7 @@ class ViewUi : Form {
                 if (cap.Grab(p.Hwnd, AppName(p), opacity, cursor, outside)) {
                     lock (desk.Lock) { p.PicW = cap.Width; p.PicH = cap.Height; }
                     shared.Publish(p.Slot, cap.Pixels, cap.Width, cap.Height, x, y, scale, depth);
-                }
+                } else if (cap.Width > 0) shared.Place(p.Slot, x, y, scale, depth);   // 1.9: moved, same picture
             }
             foreach (var kv in new List<KeyValuePair<Placement, Capture>>(caps)) if (!list.Contains(kv.Key)) { kv.Value.Dispose(); caps.Remove(kv.Key); }
             int spent = Environment.TickCount - t0;

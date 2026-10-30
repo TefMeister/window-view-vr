@@ -73,13 +73,17 @@ struct Quad {   // one slot's picture in one session
     std::vector<ID3D11Texture2D*> d11;
     std::vector<ID3D12Resource*> d12;
     ID3D12Resource* upload = nullptr; UINT64 upload_bytes = 0;
+    // 1.9 (2026-10-30, Tefa: "is it somehow possible to have non laggy windows"): each quad copies with its own allocator and
+    // list and is NOT waited for; `done_at` is the fence value its last copy signals, waited on only before the buffer or the
+    // allocator is reused or freed (one picture per frame at most, so the GPU has finished it by then)
+    ID3D12CommandAllocator* alloc = nullptr; ID3D12GraphicsCommandList* list = nullptr; UINT64 done_at = 0;
     LONG shown_frame = -1;           // -1: nothing uploaded yet, so the quad is not shown
 };
 struct Session {
     LONG api = WINDOW_VIEW_API_NONE;
     ID3D11Device* d11 = nullptr; ID3D11DeviceContext* ctx = nullptr;
-    ID3D12Device* d12 = nullptr; ID3D12CommandQueue* queue = nullptr; ID3D12CommandAllocator* alloc = nullptr;
-    ID3D12GraphicsCommandList* list = nullptr; ID3D12Fence* fence = nullptr; HANDLE fence_event = nullptr; UINT64 fence_value = 0;
+    ID3D12Device* d12 = nullptr; ID3D12CommandQueue* queue = nullptr;
+    ID3D12Fence* fence = nullptr; HANDLE fence_event = nullptr; UINT64 fence_value = 0;
     XrSpace view_space = XR_NULL_HANDLE;   // head-locked: the quads live here
     XrSpace local_space = XR_NULL_HANDLE;  // the room mode: the quads live here, around the anchor
     bool anchor_ok = false;
@@ -89,9 +93,6 @@ struct Session {
     // 1.5
     bool ours_attached = false;            // our controller action set is attached beside the game's
     bool both_was = false;                 // the left stick was in last frame (the CONTROL switch fires once per press)
-    ULONGLONG lclick_since = 0;            // 1.7: when the left stick went in
-    bool lclick_held = false;              // 1.7: this press already reached the hold (kSelfHoldMs)
-    LONG self_toggles = 0;                 // 1.7: holds so far (mod 256), reported in bits 8..15 of `buttons`
     XrSpace aim_space = XR_NULL_HANDLE;    // the right controller's aim pose
     XrSpace left_aim_space = XR_NULL_HANDLE;   // the left controller's (it carries windows too)
     Quad cursor[2];                        // the pointer: white over a window, yellow between windows
@@ -155,10 +156,20 @@ void heartbeat(WindowViewShared* s, LONG api) {
 }
 
 // ---- swapchains and uploads --------------------------------------------------------------------------------------
-void destroy_quad(Quad& q) {
+// the GPU has finished everything up to fence value v (normally at once: v was signalled at least a frame ago)
+void wait_done(Session& s, UINT64 v) {
+    if (s.fence == nullptr || v == 0 || s.fence->GetCompletedValue() >= v) return;
+    s.fence->SetEventOnCompletion(v, s.fence_event);
+    WaitForSingleObject(s.fence_event, kFenceWaitMs);
+}
+void destroy_quad(Session& s, Quad& q) {
+    wait_done(s, q.done_at);   // the GPU may still be copying out of its buffer
+    q.done_at = 0;
     for (auto* t : q.d11) release(t);
     q.d11.clear();
     q.d12.clear();   // the runtime owns the images; the vector only borrowed them
+    release(q.list);
+    release(q.alloc);
     release(q.upload);
     q.upload_bytes = 0;
     if (q.swapchain != XR_NULL_HANDLE && g_next_destroy_swapchain != nullptr) g_next_destroy_swapchain(q.swapchain);
@@ -181,7 +192,7 @@ bool pick_format(XrSession xs, int64_t& format) {
 // a swapchain of exactly this size for the quad; remade when the size changes
 bool ensure_swapchain(Session& s, XrSession xs, Quad& q, LONG w, LONG h) {
     if (q.swapchain != XR_NULL_HANDLE && q.width == w && q.height == h) return true;
-    destroy_quad(q);
+    destroy_quad(s, q);
     if (g_next_create_swapchain == nullptr || g_next_enum_formats == nullptr || g_next_enum_images == nullptr) return false;
     int64_t format = 0;
     if (!pick_format(xs, format)) { note_error(-1000); return false; }
@@ -225,14 +236,23 @@ bool upload_d3d11(Session& s, Quad& q, uint32_t index, const uint8_t* px) {
     return true;
 }
 
-// an upload buffer (rows padded to 256 bytes, as D3D12 wants), a copy on the game's queue, and a wait so the buffer
-// can be reused next time; the image goes RENDER_TARGET -> COPY_DEST -> RENDER_TARGET, the state OpenXR hands it over in
+// an upload buffer (rows padded to 256 bytes, as D3D12 wants) and a copy on the game's queue, not waited for (1.9: the
+// wait cost the game's frame every picture); the image goes RENDER_TARGET -> COPY_DEST -> RENDER_TARGET, the state OpenXR
+// hands it over in. The runtime orders it before its own use of the image, since both are on the game's queue.
 bool upload_d3d12(Session& s, Quad& q, uint32_t index, const uint8_t* px) {
-    if (index >= q.d12.size() || s.list == nullptr) return false;
+    if (index >= q.d12.size() || s.fence == nullptr) return false;
+    if (q.alloc == nullptr) {
+        const D3D12_COMMAND_LIST_TYPE type = s.queue->GetDesc().Type;
+        bool ok = SUCCEEDED(s.d12->CreateCommandAllocator(type, IID_PPV_ARGS(&q.alloc)));
+        ok = ok && SUCCEEDED(s.d12->CreateCommandList(0, type, q.alloc, nullptr, IID_PPV_ARGS(&q.list)));
+        if (ok) q.list->Close();   // made open; kept closed between uploads
+        if (!ok) { release(q.list); release(q.alloc); note_error(-1001); return false; }
+    }
+    wait_done(s, q.done_at);   // its last copy out of the buffer, with the allocator (finished long ago, normally)
     const UINT pitch = (static_cast<UINT>(q.width) * 4 + 255u) & ~255u;
     const UINT64 bytes = static_cast<UINT64>(pitch) * static_cast<UINT64>(q.height);
     if (q.upload == nullptr || q.upload_bytes < bytes) {
-        release(q.upload);
+        release(q.upload);   // finished with: wait_done above
         D3D12_HEAP_PROPERTIES hp{};
         hp.Type = D3D12_HEAP_TYPE_UPLOAD;
         D3D12_RESOURCE_DESC rd{};
@@ -252,7 +272,7 @@ bool upload_d3d12(Session& s, Quad& q, uint32_t index, const uint8_t* px) {
     if (FAILED(q.upload->Map(0, &none, reinterpret_cast<void**>(&dst)))) return false;
     for (LONG y = 0; y < q.height; ++y) std::memcpy(dst + static_cast<size_t>(y) * pitch, px + static_cast<size_t>(y) * q.width * 4, static_cast<size_t>(q.width) * 4);
     q.upload->Unmap(0, nullptr);
-    if (FAILED(s.alloc->Reset()) || FAILED(s.list->Reset(s.alloc, nullptr))) return false;
+    if (FAILED(q.alloc->Reset()) || FAILED(q.list->Reset(q.alloc, nullptr))) return false;
     ID3D12Resource* tex = q.d12[index];
     D3D12_RESOURCE_BARRIER b{};
     b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -260,7 +280,7 @@ bool upload_d3d12(Session& s, Quad& q, uint32_t index, const uint8_t* px) {
     b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-    s.list->ResourceBarrier(1, &b);
+    q.list->ResourceBarrier(1, &b);
     D3D12_TEXTURE_COPY_LOCATION to{};
     to.pResource = tex;
     to.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
@@ -274,19 +294,15 @@ bool upload_d3d12(Session& s, Quad& q, uint32_t index, const uint8_t* px) {
     from.PlacedFootprint.Footprint.Height = static_cast<UINT>(q.height);
     from.PlacedFootprint.Footprint.Depth = 1;
     from.PlacedFootprint.Footprint.RowPitch = pitch;
-    s.list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+    q.list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
     b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
     b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    s.list->ResourceBarrier(1, &b);
-    if (FAILED(s.list->Close())) return false;
-    ID3D12CommandList* lists[] = {s.list};
+    q.list->ResourceBarrier(1, &b);
+    if (FAILED(q.list->Close())) return false;
+    ID3D12CommandList* lists[] = {q.list};
     s.queue->ExecuteCommandLists(1, lists);
-    const UINT64 v = ++s.fence_value;
-    s.queue->Signal(s.fence, v);
-    if (s.fence->GetCompletedValue() < v) {
-        s.fence->SetEventOnCompletion(v, s.fence_event);
-        WaitForSingleObject(s.fence_event, kFenceWaitMs);
-    }
+    q.done_at = ++s.fence_value;
+    s.queue->Signal(s.fence, q.done_at);
     return true;
 }
 
@@ -444,7 +460,7 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         Quad& q = s.quads[i];
         const LONG w = sl.width, h = sl.height;
         if (!sl.visible || w <= 0 || h <= 0 || w > WINDOW_VIEW_MAX_W || h > WINDOW_VIEW_MAX_H) {
-            if (q.swapchain != XR_NULL_HANDLE) destroy_quad(q);   // the window went away or was hidden
+            if (q.swapchain != XR_NULL_HANDLE) destroy_quad(s, q);   // the window went away or was hidden
             continue;
         }
         if (!ensure_swapchain(s, xs, q, w, h)) continue;
@@ -466,12 +482,15 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         l.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(q.width), static_cast<int32_t>(q.height)}};
         l.subImage.imageArrayIndex = 0;
         // on the desk the window's centre is (x, y) at `distance`; pushed back by `depth` along the same line of sight, so it
-        // keeps its place in the view and shrinks with the distance (its size in metres stays the same)
+        // keeps its place in the view and shrinks with the distance (its size in metres stays the same). 1.9 (Tefa 2026-10-30:
+        // "windows move further and closer when i want to move them from side to side"): the desk is CURVED around the eyes,
+        // x is the distance along the curve, so a window moved sideways stays as far away and turns to face the eyes
         const float depth = sl.depth > 0.05f ? sl.depth : 1.0f;
-        const XrVector3f p{sl.x * depth, sl.y * depth, -distance * depth};
-        s.slot_face[i] = {0, 0, 0, 1};
+        const float yaw = sl.x / distance;   // radians round the curve
+        const XrVector3f p{std::sin(yaw) * distance * depth, sl.y * depth, -std::cos(yaw) * distance * depth};
+        s.slot_face[i] = q_axis(0, 1, 0, -yaw);
         if (!room) {
-            l.pose.orientation = {0, 0, 0, 1};
+            l.pose.orientation = s.slot_face[i];
             l.pose.position = p;
         } else {
             // facing the anchor, upright: turn +Z (the quad's front) towards it, first tipped about X, then about Y
@@ -507,12 +526,10 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
 }
 
 void destroy_session_state(Session& s) {
-    for (auto& q : s.quads) destroy_quad(q);
-    for (auto& q : s.cursor) destroy_quad(q);
+    for (auto& q : s.quads) destroy_quad(s, q);
+    for (auto& q : s.cursor) destroy_quad(s, q);
     release(s.ctx);
     release(s.d11);
-    release(s.list);
-    release(s.alloc);
     release(s.fence);
     if (s.fence_event != nullptr) { CloseHandle(s.fence_event); s.fence_event = nullptr; }
     release(s.queue);
@@ -540,11 +557,7 @@ XRAPI_ATTR XrResult XRAPI_CALL wv_xrCreateSession(XrInstance instance, const XrS
             s.d12->AddRef();
             s.queue = b->queue;
             s.queue->AddRef();
-            const D3D12_COMMAND_LIST_TYPE type = s.queue->GetDesc().Type;
-            bool ok = SUCCEEDED(s.d12->CreateCommandAllocator(type, IID_PPV_ARGS(&s.alloc)));
-            ok = ok && SUCCEEDED(s.d12->CreateCommandList(0, type, s.alloc, nullptr, IID_PPV_ARGS(&s.list)));
-            if (ok) s.list->Close();   // made open; kept closed between uploads
-            ok = ok && SUCCEEDED(s.d12->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&s.fence)));
+            bool ok = SUCCEEDED(s.d12->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&s.fence)));   // lists: per quad
             s.fence_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             if (!ok || s.fence_event == nullptr) { destroy_session_state(s); s = Session{}; s.api = WINDOW_VIEW_API_OTHER; note_error(-1001); }
         }

@@ -55,8 +55,7 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    work, the left stick click does nothing for Window View. Use it when the game stops seeing your controllers with Window
    View on (seen once in Village on Virtual Desktop, 2026-10-27). Takes effect at the next game start.
 9. New in 1.7: three rows are always in the list. **Window View** itself, its own **Keyboard** and **Lanes** (the Windows
-   Terminal window). Each has a Show box; they have no REMOVE. **Hold the left stick in for half a second** to show or hide
-   the Window View window in the headset; a short click still switches the controllers. The keyboard types into the
+   Terminal window). Each has a Show box; they have no REMOVE. The keyboard types into the
    window you last clicked: point at a key and pull the trigger. Shift and Ctrl hold for the next key only.
 
 Windows come back where you left them next time (matched by program and title), from
@@ -176,6 +175,13 @@ moves more than 14 picture pixels (then it follows, so sliders still drag); the 
 release; and the Show tick is a big SHOWN / HIDDEN button that switches on the press. Builds; not yet tried in the headset. The same day: the
 window grows to show every row of its list instead of scrolling (up to the screen's height; Tefa: *"so it automatically scales
 longer, instead of having to scroll down"*).
+
+1.9, 2026-10-30 (Tefa: *"is it somehow possible to have non laggy windows"*): measured in the headset with RE Village
+(D3D12) and six windows: the game ran at 59.5 frames a second instead of 72 while the busiest window (the terminal) sent
+32 pictures a second, and the layer waited inside the game's frame for each picture's copy to finish. Each window now
+copies with its own command list and nothing waits; a window's copy is only waited for before its own buffer is used
+again, a frame or more later. The left-stick hold that showed or hid Window View's own window is gone (Tefa: *"please
+remove that feature all together"*); a click still switches the controllers.
 
 ## Limits
 

@@ -33,9 +33,11 @@ struct WindowFrame {
     public static WindowFrame Of(Placement p, float distance, bool room) {
         var f = new WindowFrame();
         float d = p.Depth;
-        f.Centre = new V3(p.X * d, p.Y * d, -distance * d);
+        double yaw = p.X / distance;   // 1.9: the desk is curved round the eyes, X along the curve (the layer's build_quads)
+        float sy = (float)Math.Sin(yaw), cy = (float)Math.Cos(yaw);
+        f.Centre = new V3(sy * distance * d, p.Y * d, -cy * distance * d);
         f.W = p.PicW * p.Scale; f.H = p.PicH * p.Scale;
-        if (!room) { f.Right = new V3(1, 0, 0); f.Up = new V3(0, 1, 0); f.Normal = new V3(0, 0, 1); return f; }
+        if (!room) { f.Right = new V3(cy, 0, sy); f.Up = new V3(0, 1, 0); f.Normal = new V3(-sy, 0, cy); return f; }
         float len = f.Centre.Length;
         var n = f.Centre * (-1f / len);
         double phi = Math.Atan2(n.X, n.Z), theta = -Math.Asin(n.Y);   // turned about Y by phi after tipping about X by theta

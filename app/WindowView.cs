@@ -102,8 +102,6 @@ class Shared : IDisposable {
         buttons = view.ReadInt32(BUTTONS);
         return view.ReadInt32(RAY_VALID) != 0;
     }
-    // 1.7: how many times the left stick has been held in for the hold time (mod 256; the layer writes it every frame)
-    public int SelfToggles { get { return (view.ReadInt32(BUTTONS) >> 8) & 0xFF; } }
     // another app (Hand Poser's nudge) is using X / Y / A / B and the grips right now
     public bool ButtonsClaimed { get { ulong c = view.ReadUInt64(BUTTON_CLAIM); return c != 0 && GetTickCount64() - c < 500; } }
     public bool ReadLeftRay(out V3 o, out V3 d, out float squeeze, out float stickY) {
@@ -121,6 +119,16 @@ class Shared : IDisposable {
         }
     }
     public void Hide(int slot) { if (slot >= 0 && slot < SLOTS) view.Write(Off(slot) + S_VISIBLE, 0); }
+    // 1.9: only where the window hangs, no new picture: a carried window whose picture does not change still moves
+    // (Tefa 2026-10-30: "grip zones got stuck and teleported when i released RG"). The layer reads these every frame.
+    public void Place(int slot, float x, float y, float scale, float depth) {
+        if (slot < 0 || slot >= SLOTS) return;
+        int off = Off(slot);
+        view.Write(off + S_X, x);
+        view.Write(off + S_Y, y);
+        view.Write(off + S_SCALE, scale);
+        view.Write(off + S_DEPTH, depth);
+    }
     // one finished picture: into the buffer the layer is not reading, then the slot's numbers, the frame counter last
     public void Publish(int slot, byte[] bgra, int w, int h, float x, float y, float scale, float depth) {
         if (slotViews[slot] == null) {

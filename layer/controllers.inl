@@ -31,9 +31,6 @@ PFN_xrDestroySpace g_next_destroy_space = nullptr;
 PFN_xrLocateSpaces g_next_locate_spaces = nullptr;
 PFN_xrLocateSpacesKHR g_next_locate_spaces_khr = nullptr;
 
-constexpr ULONGLONG kSelfHoldMs = 500;    // holding the left stick in this long shows or hides Window View's own window (1.7: 2 s;
-                                           // 1.7.2, 2026-10-29, Tefa: "2 seconds is so long", half a second now)
-
 XrActionSet g_set = XR_NULL_HANDLE;
 bool g_actions_failed = false;
 bool g_actions_off = false;   // the app's CONTROLLERS switch says leave them to the game: no set, no bindings of ours
@@ -349,18 +346,12 @@ void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime whe
     if (now_on && !g_ctrl_was) InterlockedIncrement(&g_ctrl_gen);   // a fresh hold of the game's hands and buttons
     g_ctrl_was = now_on;
     if (!s.ours_attached) { sh->ray_valid = 0; return; }
-    // the left stick clicked in: CONTROL mode on / off. 1.7 (Tefa 2026-10-28: "hold Lthumb for 2 seconds to make window
-    // view window in the headset to appear/dissapear"): a click now counts when the stick is let go before kSelfHoldMs;
-    // held that long it is a hold instead, counted once in bits 8..15 of `buttons` (Hand Poser and the pointer read only
-    // bits 0..3), and the app shows or hides its own window
+    // the left stick clicked in: CONTROL mode on / off, when the stick is let go. (1.7's hold for half a second, which
+    // showed or hid Window View's own window, is gone in 1.9: Tefa 2026-10-30, "please remove that feature all together")
     const bool click = read_bool(xs, A_LCLICK);
-    const ULONGLONG now = GetTickCount64();
-    if (click && !s.both_was) { s.lclick_since = now; s.lclick_held = false; }
-    if (click && !s.lclick_held && now - s.lclick_since >= kSelfHoldMs) { s.lclick_held = true; s.self_toggles = (s.self_toggles + 1) & 0xFF; }
-    if (!click && s.both_was && !s.lclick_held) sh->ctrl_mode = sh->ctrl_mode ? 0 : 1;
+    if (!click && s.both_was) sh->ctrl_mode = sh->ctrl_mode ? 0 : 1;
     s.both_was = click;
-    const LONG self_bits = s.self_toggles << 8;
-    if (sh->ctrl_mode == 0) { sh->ray_valid = 0; sh->lray_valid = 0; sh->buttons = self_bits; return; }
+    if (sh->ctrl_mode == 0) { sh->ray_valid = 0; sh->lray_valid = 0; sh->buttons = 0; return; }
     XrVector3f o{}, d{};
     if (!aim_ray(s, xs, g_act[A_AIM], s.aim_space, when, room, o, d)) { sh->ray_valid = 0; return; }
     sh->ray_o[0] = o.x; sh->ray_o[1] = o.y; sh->ray_o[2] = o.z;
@@ -375,7 +366,7 @@ void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime whe
     sh->trigger = read_float(xs, A_TRIGGER);
     sh->squeeze = read_float(xs, A_SQUEEZE);
     sh->stick_y = read_vec2(xs, A_STICK).y;
-    sh->buttons = (read_bool(xs, A_A) ? 1 : 0) | (read_bool(xs, A_Y) ? 2 : 0) | (read_bool(xs, A_B) ? 4 : 0) | (read_bool(xs, A_X) ? 8 : 0) | self_bits;
+    sh->buttons = (read_bool(xs, A_A) ? 1 : 0) | (read_bool(xs, A_Y) ? 2 : 0) | (read_bool(xs, A_B) ? 4 : 0) | (read_bool(xs, A_X) ? 8 : 0);
     sh->ray_valid = 1;
     InterlockedIncrement(&sh->ray_seq);
 }
