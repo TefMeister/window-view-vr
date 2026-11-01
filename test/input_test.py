@@ -26,6 +26,12 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SIM_RUNTIME = r"D:\claude video game stuff\tools\OpenXR-Simulator\openxr_simulator.json"
 LAYER_NAME = "XR_APILAYER_FLATTOVR_window_view"
 NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v2", 636, 180
+CURSOR_VISIBLE, CURSOR_SLOT, CURSOR_EDGE = 512, 516, 532   # shared.h; CURSOR_SLOT follows CURSOR_VISIBLE
+APP_EXE = "WindowView.exe"
+# 1.7 adds these three rows by itself unless the layout already has them; the test lists them HIDDEN, so Notepad is the
+# only window on the desk and nothing typed can reach the terminal this test is started from
+ALWAYS_THERE_HIDDEN = (APP_EXE + "|Window View|0.0|0.0|0.0006|1|0\n" + APP_EXE + "|Keyboard (Window View)|0.0|0.0|0.0006|1|0\n"
+                       "WindowsTerminal.exe||0.0|0.0|0.0006|1|0\n")
 u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
 VK_PRIOR, VK_NEXT = 0x21, 0x22
 
@@ -112,6 +118,26 @@ def app_status(app_pid):
     return texts[0] if texts else "(no status)"
 
 
+def pointer(m):
+    """what the app tells the layer about the desk pointer: (visible, slot, between-windows)"""
+    vis, slot = struct.unpack_from("<ii", m, CURSOR_VISIBLE)
+    edge, = struct.unpack_from("<i", m, CURSOR_EDGE)
+    return vis, slot, edge
+
+
+def safe_to_type(m, parked):
+    """2026-11-01: only type while the keys can ONLY reach Notepad. The run of that day typed "hello" into the Claude
+    session twice: since 1.7 the app always adds itself, its keyboard and the Lanes terminal to the desk, the pointer
+    starts on the TOP window (Lanes), and the click there made the terminal the typing target. Two things must hold:
+    the app's hook has the keyboard (the real cursor is still parked), and the desk pointer lies on Notepad (slot 0)."""
+    vis, slot, edge = pointer(m)
+    if cursor() != parked:
+        return "the real cursor is not parked, so the app does not have the keyboard"
+    if not (vis == 1 and slot == 0 and edge == 0):
+        return "the desk pointer is not on Notepad (visible %d, window slot %d, between windows %d)" % (vis, slot, edge)
+    return None
+
+
 def notepad_text(hwnd):
     edit = u32.FindWindowExW(hwnd, None, "Edit", None)
     if not edit:
@@ -145,7 +171,7 @@ def main():
     layout = os.path.join(layout_dir, "layout.txt")
     backup = open(layout).read() if os.path.exists(layout) else None
     with open(layout, "w") as f:
-        f.write("notepad.exe|wv_test|0.0|0.0|0.0006|0.85|1\n")
+        f.write("notepad.exe|wv_test|0.0|0.0|0.0006|0.85|1\n" + ALWAYS_THERE_HIDDEN)
 
     app = subprocess.Popen([os.path.join(ROOT, "dist", "WindowView.exe"), "--test-input"])
     layer_dir = tempfile.mkdtemp(prefix="windowview-test-")
@@ -173,10 +199,18 @@ def main():
         ok["real cursor stayed parked"] = cursor() == parked
         print("real cursor parked at", parked, "now", cursor())
         move(-60, -40)
-        time.sleep(0.2)
-        click()                            # the desk cursor is back at (0,0): the middle of Notepad's picture = the text area
         time.sleep(0.3)
-        for vk in (0x48, 0x45, 0x4C, 0x4C, 0x4F):   # h e l l o
+        why = safe_to_type(m, parked)      # checked BEFORE the click too: a click makes its window the typing target
+        if why:
+            ok["safe to click and type"] = False
+            raise RuntimeError("STOPPED before clicking or typing: " + why)
+        click()                            # the desk cursor is on Notepad's only window: its middle = the text area
+        time.sleep(0.3)
+        for vk in (0x48, 0x45, 0x4C, 0x4C, 0x4F):   # h e l l o, each one only while it is still safe
+            why = safe_to_type(m, parked)
+            if why:
+                ok["safe to click and type"] = False
+                raise RuntimeError("STOPPED in the middle of typing: " + why)
             tap(vk)
         time.sleep(0.6)
         text = notepad_text(hw[0])
@@ -225,6 +259,11 @@ def main():
         for k, v in ok.items():
             print(("  ok   " if v else "  FAIL ") + k)
         print("RESULT:", "PASS" if all(ok.values()) else "FAIL")
+    except RuntimeError as e:              # a safety stop: nothing was typed anywhere it should not be
+        print(e)
+        for k, v in ok.items():
+            print(("  ok   " if v else "  FAIL ") + k)
+        print("RESULT: FAIL")
     finally:
         tap(VK_NEXT)
         if not a.keep:
