@@ -93,6 +93,11 @@ On the dev PC with the OpenXR Simulator, 2026-10-16, `[verified-numerically 2026
   desk, the window dragged right by its header, the mouse moving again after Page Down. All six PASS.
 - A game started with no app running keeps running and shows nothing.
 
+Again for 1.9 on the dev PC with the OpenXR Simulator, 2026-11-02, `[verified-numerically 2026-11-02, n=1 each]`:
+`input_test.py` all six PASS (it now hides the three rows 1.7 adds by itself, and stops before typing unless the desk
+pointer is on Notepad, so a test can never type into another window); `view_test.py` D3D11 and D3D12 PASS, and again with
+`--actions`, `--actions --game-only` and `--room`.
+
 First use in a real headset, home PC, 2026-10-24 (Tefa): two problems, both fixed in v1.2 the same evening, not yet
 tried again:
 
