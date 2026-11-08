@@ -360,12 +360,12 @@ void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime whe
         sh->lray_o[0] = o.x; sh->lray_o[1] = o.y; sh->lray_o[2] = o.z;
         sh->lray_d[0] = d.x; sh->lray_d[1] = d.y; sh->lray_d[2] = d.z;
         sh->lsqueeze = read_float(xs, A_LSQUEEZE);
-        sh->lstick_y = read_vec2(xs, A_LSTICK).y;
+        { const XrVector2f ls = read_vec2(xs, A_LSTICK); sh->lstick_y = ls.y; sh->lstick_x = ls.x; }
         sh->lray_valid = 1;
     } else sh->lray_valid = 0;
     sh->trigger = read_float(xs, A_TRIGGER);
     sh->squeeze = read_float(xs, A_SQUEEZE);
-    sh->stick_y = read_vec2(xs, A_STICK).y;
+    { const XrVector2f rs = read_vec2(xs, A_STICK); sh->stick_y = rs.y; sh->stick_x = rs.x; }
     sh->buttons = (read_bool(xs, A_A) ? 1 : 0) | (read_bool(xs, A_Y) ? 2 : 0) | (read_bool(xs, A_B) ? 4 : 0) | (read_bool(xs, A_X) ? 8 : 0);
     sh->ray_valid = 1;
     InterlockedIncrement(&sh->ray_seq);

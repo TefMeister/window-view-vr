@@ -8,7 +8,7 @@
 //   2. CONTROL mode (the left thumbstick clicked in; Tefa: "use the motion controllers to do all the tweaking and slider tuning"):
 //      the layer writes both controllers' aim rays; here they are met with every window as it really hangs (flat facing the
 //      eyes in follow mode, turned to face the anchor in room mode).
-//      The RIGHT ray points: trigger = left click (held = drag, for sliders), A = right click, right stick up / down = the
+//      The RIGHT ray points: trigger or A = left click (held = drag, for sliders; 1.10, was A = right click), right stick up / down = the
 //      mouse wheel, Y (B on Index) = bring every window back in front of you.
 //      Either GRIP picks up the window under that hand's ray at the spot it points at and carries it, one window in each hand
 //      at once (Tefa: "the ability to grab these windows with LG and RG, two windows at once as well"); while carried, that
@@ -82,7 +82,7 @@ class Pointer : IDisposable {
     readonly InputRouter input;
     readonly Thread thread;
     volatile bool running = true;
-    bool trigger, a, y;
+    bool trigger, a, y, leftDown;   // leftDown (1.10): the left button as sent, from the trigger or A
     bool held; Placement heldOn; float heldX, heldY;   // 1.8: the pointer held still for a click
     float wheel;
     int lastSeq = -1, lastTick = Environment.TickCount;
@@ -168,7 +168,10 @@ class Pointer : IDisposable {
         // Hand Poser's nudge borrows A, Y, X, B and both grips (Tefa: "X is -1, Y is -5 and holding LG makes X and Y repeat");
         // then nothing here is carried, right-clicked or recentred, but the trigger still clicks and the stick still scrolls
         bool claimed = shared.ButtonsClaimed;
-        if (claimed) { sq = 0; lsq = 0; buttons = 0; }
+        // 1.10 (Tefa 2026-11-09): the helpers now use Y / B (undo, redo), X (clear the ticks) and the right stick (the steps), and
+        // A is everyone's left click: while one claims them, only A and the trigger click here, the stick does not scroll, the
+        // grips still carry
+        if (claimed) { buttons &= 1; stick = 0; }
         Placement hover; float hu = 0, hv = 0;
         lock (desk.Lock) {
             CarryStep(right, o, d, sq, right.Window != null ? stick : 0, distance, room, dt, left.Window, "right");
@@ -180,7 +183,7 @@ class Pointer : IDisposable {
         if (hover != null) {
             float cx, cy, seen;
             lock (desk.Lock) { cx = hover.Left + hu * hover.PicW * hover.Seen; cy = hover.Top - hv * hover.PicH * hover.Seen; seen = hover.Seen; }
-            bool touch = right.Window == null && trig > TRIGGER_TOUCH;
+            bool touch = right.Window == null && (trig > TRIGGER_TOUCH || (buttons & 1) != 0);   // 1.10: A holds the click spot too
             if (!touch) { held = false; heldOn = null; }
             else if (!held) { held = true; heldOn = hover; heldX = cx; heldY = cy; }   // the first touch: hold here
             if (held && heldOn == hover && seen > 0 && Math.Sqrt((cx - heldX) * (cx - heldX) + (cy - heldY) * (cy - heldY)) / seen < CLICK_SLOP_PX)
@@ -188,10 +191,13 @@ class Pointer : IDisposable {
             else { if (held) heldOn = null; input.PointerTo(cx, cy); }   // moved past the slop: follow (a drag), until the trigger is let go
         }
         if (right.Window != null) return;   // while the right hand carries, its trigger and stick neither click nor scroll
-        bool tNow = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;   // trigger: the left button (held = drag a slider)
-        if (tNow != trigger) { trigger = tNow; input.PointerLeft(tNow); }
-        bool aNow = (buttons & 1) != 0;                                  // A: the right button
-        if (aNow != a) { a = aNow; input.PointerRight(aNow); }
+        // 1.10 (Tefa 2026-11-09: "use A instead of left trigger to use as a mouse left click basically, to tick and untick boxes"):
+        // A is the left button too (held = drag), beside the trigger; the right button is gone from the controllers
+        bool tNow = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;
+        bool aNow = (buttons & 1) != 0;
+        bool leftNow = tNow || aNow;
+        trigger = tNow; a = aNow;
+        if (leftNow != leftDown) { leftDown = leftNow; input.PointerLeft(leftNow); }
         if (Math.Abs(stick) > STICK_DEAD) {                              // the right stick: the mouse wheel
             float amount = (Math.Abs(stick) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(stick);
             wheel += amount * WHEEL_NOTCHES_PER_S * dt;
@@ -204,8 +210,8 @@ class Pointer : IDisposable {
 
     // CONTROL mode went off: nothing stays held
     void Release() {
-        if (trigger) { trigger = false; input.PointerLeft(false); }
-        if (a) { a = false; input.PointerRight(false); }
+        trigger = false; a = false;
+        if (leftDown) { leftDown = false; input.PointerLeft(false); }
         lock (desk.Lock) {
             if (right.Window != null || left.Window != null) desk.Save();
             right.Window = left.Window = null;

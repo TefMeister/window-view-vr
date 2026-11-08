@@ -48,7 +48,7 @@ class Shared : IDisposable {
     // v2 (1.4): the room mode and per-window depth (shared.h); new names, so an old layer and a new app never mix
     const string NAME = @"Local\FlatToVR_WindowView_v2", SLOT_NAME = @"Local\FlatToVR_WindowView_v2_slot{0}";
     const uint MAGIC = 0x57564956, VERSION = 2;
-    public const int SIZE = 636, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
+    public const int SIZE = 644, SLOTS = 8, MAX_W = 2560, MAX_H = 1600;
     public const long SLOT_BYTES = MAX_W * MAX_H * 4L;
     const int APP_HEARTBEAT = 8, LAYER_HEARTBEAT = 16, LAYER_PID = 24, API = 28, GAME_NAME = 36, DISTANCE = 164,
               QUADS = 168, UPLOADS = 172, LAST_ERROR = 176, SLOTS_OFF = 180, SLOT = 40, ROOM_MODE = 500, RECENTER_SEQ = 504, ANCHOR_SEEN = 508,

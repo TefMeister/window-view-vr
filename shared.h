@@ -21,7 +21,7 @@
 #define WINDOW_VIEW_MAX_H 1600
 #define WINDOW_VIEW_SLOT_BYTES (WINDOW_VIEW_MAX_W * WINDOW_VIEW_MAX_H * 4)   // one pixel buffer
 #define WINDOW_VIEW_SLOT_MAPPING_BYTES (2 * WINDOW_VIEW_SLOT_BYTES)        // both buffers of one slot
-#define WINDOW_VIEW_HEADER_SIZE 636     // bytes; the app maps exactly this much (WindowView.cs SIZE)
+#define WINDOW_VIEW_HEADER_SIZE 644     // bytes; the app maps exactly this much (WindowView.cs SIZE)
 
 // which graphics API the game binds (header `api`)
 #define WINDOW_VIEW_API_NONE 0
@@ -82,8 +82,11 @@ struct WindowViewShared {
     float lsqueeze;                  // 620  layer: left grip 0..1
     float lstick_y;                  // 624  layer: left stick up (+) / down (-)
     // 1.5: another app borrowing the buttons (Hand Poser's nudge: X / Y / A / B step the ticked sliders, a grip repeats them)
-    uint64_t button_claim_ms;        // 628  that app: GetTickCount64() while it wants them; Window View leaves A, Y and the grips alone then
-};                                   // 636 bytes
+    uint64_t button_claim_ms;        // 628  that app: GetTickCount64() while it wants them; Window View leaves X, Y, B and the right stick alone then
+    // 1.10 (Tefa 2026-11-09: "change the slider tuning to the RS so left and right are -1 and +1, up and down on the stick are +5 and -5")
+    float stick_x;                   // 636  layer: right stick right (+) / left (-)
+    float lstick_x;                  // 640  layer: left stick right (+) / left (-)
+};                                   // 644 bytes
 #pragma pack(pop)
 static_assert(sizeof(WindowViewSlot) == 40, "the app reads this layout by offset");
 static_assert(sizeof(WindowViewShared) == WINDOW_VIEW_HEADER_SIZE, "the app reads this layout by offset");
