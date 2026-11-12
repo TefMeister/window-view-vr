@@ -14,7 +14,7 @@ using System.Text;
 static class ConsoleInput {
     const string TERMINAL_CLASS = "CASCADIA_HOSTING_WINDOW_CLASS";
     const int CACHE_MS = 2000;   // how long a found program is kept for the same window and title
-    const uint GA_ROOT = 2, TH32CS_SNAPPROCESS = 2, GENERIC_RW = 0xC0000000, SHARE_RW = 3, OPEN_EXISTING = 3;
+    const uint GA_ROOT = 2, GA_ROOTOWNER = 3, TH32CS_SNAPPROCESS = 2, GENERIC_RW = 0xC0000000, SHARE_RW = 3, OPEN_EXISTING = 3;
     const ushort KEY_EVENT = 1;
     const uint SHIFT_PRESSED = 0x10, LEFT_CTRL_PRESSED = 0x08, LEFT_ALT_PRESSED = 0x02, ENHANCED_KEY = 0x100;
 
@@ -33,6 +33,7 @@ static class ConsoleInput {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("kernel32.dll")] static extern bool AttachConsole(uint pid);
     [DllImport("kernel32.dll")] static extern bool FreeConsole();
+    [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
     [DllImport("kernel32.dll")] static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern uint GetConsoleTitle(StringBuilder s, uint n);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
@@ -55,6 +56,16 @@ static class ConsoleInput {
         return sb.ToString() == TERMINAL_CLASS;
     }
 
+    // which program's console the keys for terminal window `hwnd` would go into (0 = none); for the tests
+    public static uint ProgramFor(IntPtr hwnd) {
+        lock (gate) {
+            IntPtr root = GetAncestor(hwnd, GA_ROOT);
+            var tsb = new StringBuilder(256);
+            GetWindowText(root, tsb, 256);
+            return FindProgram(root, tsb.ToString());
+        }
+    }
+
     // one key, pressed and let go, into the program running in the terminal window `hwnd`; false = no program found
     public static bool Type(IntPtr hwnd, uint vk, uint scan, char ch, bool extended, bool shift, bool ctrl, bool alt) {
         lock (gate) {
@@ -62,11 +73,11 @@ static class ConsoleInput {
             var tsb = new StringBuilder(256);
             GetWindowText(root, tsb, 256);
             string title = tsb.ToString();
-            uint pid = cachedWindow == root && cachedTitle == title && Environment.TickCount - cachedAt < CACHE_MS ? cachedPid : 0;
+            uint pid = cachedWindow == root && cachedTitle == Bare(title) && Environment.TickCount - cachedAt < CACHE_MS ? cachedPid : 0;
             if (pid == 0) {
                 pid = FindProgram(root, title);
                 if (pid == 0) return false;
-                cachedWindow = root; cachedTitle = title; cachedPid = pid; cachedAt = Environment.TickCount;
+                cachedWindow = root; cachedTitle = Bare(title); cachedPid = pid; cachedAt = Environment.TickCount;
             }
             if (ctrl && ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 1);         // Ctrl+letter: its control character
             else if (ctrl && ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 1);
@@ -80,7 +91,14 @@ static class ConsoleInput {
         }
     }
 
-    // the terminal's own children (not its OpenConsole.exe hosts): the one whose console title is the window's, else the newest
+    // The terminal's own children (not its OpenConsole.exe hosts) that belong to THIS window, then the active tab among them.
+    // 1.11 (2026-11-12, Tefa: typing into a clicked Claude window did not work): one WindowsTerminal.exe hosts EVERY terminal
+    // window, so its children are the programs of all of them, and 1.7.1 told them apart by title alone, falling back to the
+    // newest. Claude Code's title starts with a status sign that keeps changing while it works, so the window's title and
+    // its console's title often differed by that sign for a moment, and the keys went to the newest Claude window instead.
+    // Now: a tab's console window is owned by the terminal window it sits in (measured 2026-11-12, Windows Terminal 1.24,
+    // two Claude windows: each console's owner was its own window), so only this window's programs are candidates; among
+    // several tabs, the title decides with leading signs ignored; a window that owns no console falls back to 1.7.1's way.
     static uint FindProgram(IntPtr root, string title) {
         uint wt;
         GetWindowThreadProcessId(root, out wt);
@@ -92,14 +110,39 @@ static class ConsoleInput {
             for (bool ok = Process32First(snap, ref e); ok; ok = Process32Next(snap, ref e))
                 if (e.th32ParentProcessID == wt && !string.Equals(e.szExeFile, "OpenConsole.exe", StringComparison.OrdinalIgnoreCase)) kids.Add(e.th32ProcessID);
         } finally { CloseHandle(snap); }
-        uint newest = 0; DateTime newestStart = DateTime.MinValue;
+        var titles = new Dictionary<uint, string>();
+        var mine = new List<uint>();
         foreach (var pid in kids) {
-            string ct = null;
-            if (!WithConsole(pid, h => { var sb = new StringBuilder(512); GetConsoleTitle(sb, 512); ct = sb.ToString(); return true; })) continue;
-            if (ct == title || (ct != "" && (title.Contains(ct) || ct.Contains(title)))) return pid;
-            try { var st = Process.GetProcessById((int)pid).StartTime; if (st > newestStart) { newestStart = st; newest = pid; } } catch (Exception) { }
+            string ct = null; IntPtr owner = IntPtr.Zero;
+            if (!WithConsole(pid, h => {
+                var sb = new StringBuilder(512); GetConsoleTitle(sb, 512); ct = sb.ToString();
+                IntPtr cw = GetConsoleWindow();
+                if (cw != IntPtr.Zero) owner = GetAncestor(cw, GA_ROOTOWNER);
+                return true; })) continue;
+            titles[pid] = ct;
+            if (owner == root) mine.Add(pid);
         }
+        if (mine.Count == 1) return mine[0];
+        return PickByTitle(mine.Count > 1 ? mine : new List<uint>(titles.Keys), titles, title);
+    }
+
+    // the candidate whose console title is the window's (status signs at the start ignored), else the newest
+    static uint PickByTitle(List<uint> pids, Dictionary<uint, string> titles, string title) {
+        string want = Bare(title);
+        foreach (var pid in pids) if (Bare(titles[pid]) == want) return pid;
+        if (want != "") foreach (var pid in pids) { string ct = Bare(titles[pid]); if (ct != "" && (want.Contains(ct) || ct.Contains(want))) return pid; }
+        uint newest = 0; DateTime newestStart = DateTime.MinValue;
+        foreach (var pid in pids)
+            try { var st = Process.GetProcessById((int)pid).StartTime; if (st > newestStart) { newestStart = st; newest = pid; } } catch (Exception) { }
         return newest;
+    }
+
+    // a title without the signs and spaces in front of its first letter or digit (Claude Code's turning status sign)
+    public static string Bare(string t) {
+        if (t == null) return "";
+        int i = 0;
+        while (i < t.Length && !char.IsLetterOrDigit(t[i])) ++i;
+        return t.Substring(i).Trim();
     }
 
     // attach to `pid`'s console for the length of `work` (with Ctrl+C ignored, so a typed Ctrl+C never stops Window View)

@@ -46,8 +46,8 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    remembered; it starts OFF.
 7. Optional (1.5): click the **left thumbstick** in. The controllers now work the windows instead of the game: the game's
    hands stay frozen in their pose (its triggers and grips keep what they were, its buttons and sticks go still), and
-   you can walk round them. Point with the right controller: **trigger** clicks (hold it to drag a slider), **A** is the
-   right mouse button, the **right stick** scrolls, **Y** brings every window back in front of you. Either **grip**
+   you can walk round them. Point with the right controller: **trigger** or **A** clicks (hold it to drag a slider; 1.10,
+   A was the right mouse button before), the **right stick** scrolls, **Y** brings every window back in front of you. Either **grip**
    picks up the window that hand points at and carries it, one in each hand at once; that hand's stick pushes it away
    or pulls it in. Click the left thumbstick again to give the game its controllers back. While the Hand Poser has sliders
    ticked, X / Y / A / B and the grips step those sliders instead (see the Hand Poser's readme).
@@ -97,6 +97,12 @@ Again for 1.9 on the dev PC with the OpenXR Simulator, 2026-11-02, `[verified-nu
 `input_test.py` all six PASS (it now hides the three rows 1.7 adds by itself, and stops before typing unless the desk
 pointer is on Notepad, so a test can never type into another window); `view_test.py` D3D11 and D3D12 PASS, and again with
 `--actions`, `--actions --game-only` and `--room`.
+
+For 1.11 on the home PC, 2026-11-12, `[verified-numerically 2026-11-12, n=1 each]`: `view_test.py` D3D11 and D3D12 PASS.
+The terminal typing on its own (a small test program built on `app/ConsoleInput.cs`, two Claude Code windows open, one
+of them a throwaway with nothing sent): each window picked its own program, and "hello" then "world" typed into the
+throwaway while it was in the background appeared in its input box. `input_test.py` does not start on this PC: Windows
+11's new Notepad belongs to another program than the one started, so the test never finds its window.
 
 First use in a real headset, home PC, 2026-10-24 (Tefa): two problems, both fixed in v1.2 the same evening, not yet
 tried again:
@@ -187,6 +193,23 @@ longer, instead of having to scroll down"*).
 copies with its own command list and nothing waits; a window's copy is only waited for before its own buffer is used
 again, a frame or more later. The left-stick hold that showed or hid Window View's own window is gone (Tefa: *"please
 remove that feature all together"*); a click still switches the controllers.
+
+1.10, 2026-11-09 (Tefa: *"use A instead of left trigger to use as a mouse left click basically, to tick and untick
+boxes"*): **A** clicks like the trigger (held = drag); the right click is gone from the controllers. The helper apps
+(Hand Poser, Grip Zones, Animation & Timing) step their sliders with the right stick, so while one of them has the
+buttons, only A and the trigger click here and the stick does not scroll; the grips still carry windows. The layer now
+also passes the sticks' left / right (`shared.h` header 636 -> 644 bytes). Built and in use on the home PC since
+2026-11-09; no test of its own in the headset.
+
+1.11, 2026-11-12 (Tefa, 2026-11-08: *"can clicking on the Claude session that is not in focus in windows still make it
+still active so i can type directly into the chat - i mean in VR"*): typing into a clicked Claude Code window now goes
+to THAT window. One `WindowsTerminal.exe` hosts every terminal window, so 1.7.1 told their programs apart by title only,
+and fell back to the newest when no title matched. Claude Code's title starts with a status sign that keeps changing
+while it works, so the window's title and its console's title could differ by that sign, and the keys went to the newest
+Claude window instead `[hypothesis: the cause was not seen happening; the fallback picking another window is how the
+code read]`. Now each program's console window is asked which terminal window owns it (each tab's console is owned by
+its own window, measured with Windows Terminal 1.24), so only that window's programs are candidates; among several tabs
+the title decides, leading signs ignored.
 
 ## Limits
 

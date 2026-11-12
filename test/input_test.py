@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SIM_RUNTIME = r"D:\claude video game stuff\tools\OpenXR-Simulator\openxr_simulator.json"
 LAYER_NAME = "XR_APILAYER_FLATTOVR_window_view"
-NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v2", 636, 180
+NAME, HEADER, SLOTS_OFF = "Local\\FlatToVR_WindowView_v2", 644, 180   # 644 since 1.10 (shared.h)
 CURSOR_VISIBLE, CURSOR_SLOT, CURSOR_EDGE = 512, 516, 532   # shared.h; CURSOR_SLOT follows CURSOR_VISIBLE
 APP_EXE = "WindowView.exe"
 # 1.7 adds these three rows by itself unless the layout already has them; the test lists them HIDDEN, so Notepad is the
