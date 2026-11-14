@@ -91,6 +91,23 @@ class Hands:
         return t
 
 
+def close_echo_windows():
+    """WM_CLOSE to every terminal window titled WVKEYTEST (this test's own; each has the one echo tab)"""
+    time.sleep(1)
+    u = ctypes.windll.user32
+    hits = []
+    proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def cb(h, _):
+        c = ctypes.create_unicode_buffer(128); u.GetClassNameW(ctypes.c_void_p(h), c, 128)
+        t = ctypes.create_unicode_buffer(256); u.GetWindowTextW(ctypes.c_void_p(h), t, 256)
+        if c.value == "CASCADIA_HOSTING_WINDOW_CLASS" and t.value == TITLE:
+            hits.append(h)
+        return True
+    u.EnumWindows(proc(cb), 0)
+    for h in hits:
+        u.PostMessageW(ctypes.c_void_p(h), 0x0010, 0, 0)
+
+
 def close_app(p):
     """Window View's own close: WM_CLOSE to its main window (the keyboard window refuses a close of its own); forced after 15 s"""
     u = ctypes.windll.user32
@@ -205,6 +222,7 @@ def main():
             subprocess.run(["powershell", "-NoProfile", "-Command",
                             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*echo_keys.py*' } | "
                             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"], capture_output=True)
+            close_echo_windows()   # 2026-11-14: a killed echo left its window open ("You can now close this terminal")
             if backup is None:
                 if os.path.exists(layout):
                     os.remove(layout)
