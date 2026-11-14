@@ -62,6 +62,12 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    flashes it (green; red if the key could not be delivered) and gives that hand a short buzz. A light pull counts (about a
    third of the trigger), a resting finger never repeats, and keys are typed on a thread of their own, so none are lost or
    held back. Every press is written to `%APPDATA%\WindowViewVR\keys.log` (the newest 2,000), so a lost one can be traced.
+11. New in 1.13 (Tefa: *"add left and right mouse to all and make the pointers dots with a laser line behind them. red for
+   right, blue for left"*, and *"make all these windows act as well as the keyboard"*): while the controllers work the
+   windows, **each hand has a laser**: a thin beam from the controller ending in a dot where it meets a window, **red for the
+   right hand, blue for the left**, drawn every headset frame. **Each hand clicks at its own dot: the trigger is the left mouse
+   button (held = drag), A (right hand) / X (left hand) the right button.** One Windows mouse: the hand that presses first holds
+   it until it lets go. Every click gets the keyboard's feedback: a short flash round the dot and a buzz in that hand.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.

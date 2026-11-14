@@ -83,6 +83,9 @@ class Pointer : IDisposable {
     readonly Thread thread;
     volatile bool running = true;
     bool trigger, a, y, leftDown;   // leftDown (1.10): the left button as sent, from the trigger or A
+    bool ltrigger, rightDown;       // 1.13: the left trigger's state, the right button as sent
+    int owner = -1;                 // 1.13: the hand whose press holds the one Windows mouse (-1 = none)
+    const float CLICK_FLASH = 0.016f;   // 1.13: the click flash's side, metres per metre of distance
     bool held; Placement heldOn; float heldX, heldY;   // 1.8: the pointer held still for a click
     bool rightOnKeys;   // 1.12: the right pointer is on the keyboard this frame (its press is typed, not clicked)
     float wheel;
@@ -175,39 +178,63 @@ class Pointer : IDisposable {
         // grips still carry
         if (claimed) { buttons &= 1; stick = 0; }
         Placement hover; float hu = 0, hv = 0;
+        Placement lh = null; float lu = 0, lv = 0;
+        bool leftOnKeys = false;
+        float ltrig = Keyboard != null ? Keyboard.LTrigger : 0f;
         lock (desk.Lock) {
             CarryStep(right, o, d, sq, right.Window != null ? stick : 0, distance, room, dt, left.Window, "right");
             if (leftOk) CarryStep(left, lo, ld, lsq, lstick, distance, room, dt, right.Window, "left");
             else if (left.Grip) { left.Grip = false; if (left.Window != null) desk.Save(); left.Window = null; }
             if (right.Window != null) { hover = right.Window; hu = right.U; hv = right.V; }
             else hover = Under(o, d, distance, room, null, out hu, out hv);
+            if (leftOk && left.Window == null) lh = Under(lo, ld, distance, room, null, out lu, out lv);
             // 1.12: both hands on the keyboard (KeyboardHands.cs); a hand carrying a window types nothing
             if (Keyboard != null) {
                 int now = Environment.TickCount;
                 rightOnKeys = Keyboard.Step(KeysShared.RIGHT, right.Window == null ? hover : null, hu, hv, distance, room, trig, (buttons & 1) != 0, now);
-                Placement lh = null; float lu = 0, lv = 0;
-                if (leftOk && left.Window == null) lh = Under(lo, ld, distance, room, null, out lu, out lv);
-                Keyboard.Step(KeysShared.LEFT, lh, lu, lv, distance, room, Keyboard.LTrigger, false, now);
+                leftOnKeys = Keyboard.Step(KeysShared.LEFT, lh, lu, lv, distance, room, ltrig, false, now);
+            }
+            // 1.13: the dots. The right one is the desk cursor (DrawCursor); here only whether the right ray meets a window. The left
+            // one is drawn wherever the left ray meets a window (on the keyboard KeyboardHands writes it)
+            if (Keyboard != null) {
+                Keyboard.Keys.WriteRightHit(hover != null);
+                if (!leftOnKeys) {
+                    if (lh != null) Keyboard.Keys.WriteLeftCursor(true, WindowFrame.Of(lh, distance, room).PointAt(lu, lv), lh.Slot);
+                    else Keyboard.Keys.WriteLeftCursor(false, new V3());
+                }
             }
         }
-        if (hover != null) {
+        // 1.13 (Tefa 2026-11-14: "add left and right mouse to all", then "trigger left, A/X right"): each hand clicks where its own
+        // dot is: its trigger is the left button (held = drag), A (right hand) / X (left hand) the right button. There is one
+        // Windows mouse, so the hand that presses first owns it until both its buttons are up; the other hand's presses wait.
+        bool rFree = right.Window == null && !rightOnKeys, lFree = left.Window == null && !leftOnKeys && lh != null;
+        bool rTrig = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;
+        bool lTrig = ltrigger ? ltrig > TRIGGER_UP : ltrig > TRIGGER_DOWN;
+        trigger = rTrig; ltrigger = lTrig;
+        bool rL = rFree && rTrig, rR = rFree && (buttons & 1) != 0;
+        bool lL = lFree && lTrig, lR = lFree && !claimed && (buttons & 8) != 0;
+        if (owner < 0) owner = rL || rR ? KeysShared.RIGHT : lL || lR ? KeysShared.LEFT : -1;
+        // where the mouse is: the owning hand's dot, held still from the first touch of its trigger or button (1.8's slop),
+        // else the right hand's (hover effects follow the right pointer)
+        bool useLeft = owner == KeysShared.LEFT;
+        Placement at = useLeft ? lh : hover; float au = useLeft ? lu : hu, av = useLeft ? lv : hv;
+        bool touch = useLeft ? (ltrig > TRIGGER_TOUCH || (!claimed && (buttons & 8) != 0)) : (right.Window == null && (trig > TRIGGER_TOUCH || (buttons & 1) != 0));
+        if (at != null) {
             float cx, cy, seen;
-            lock (desk.Lock) { cx = hover.Left + hu * hover.PicW * hover.Seen; cy = hover.Top - hv * hover.PicH * hover.Seen; seen = hover.Seen; }
-            bool touch = right.Window == null && (trig > TRIGGER_TOUCH || (buttons & 1) != 0);   // 1.10: A holds the click spot too
+            lock (desk.Lock) { cx = at.Left + au * at.PicW * at.Seen; cy = at.Top - av * at.PicH * at.Seen; seen = at.Seen; }
             if (!touch) { held = false; heldOn = null; }
-            else if (!held) { held = true; heldOn = hover; heldX = cx; heldY = cy; }   // the first touch: hold here
-            if (held && heldOn == hover && seen > 0 && Math.Sqrt((cx - heldX) * (cx - heldX) + (cy - heldY) * (cy - heldY)) / seen < CLICK_SLOP_PX)
+            else if (!held) { held = true; heldOn = at; heldX = cx; heldY = cy; }   // the first touch: hold here
+            if (held && heldOn == at && seen > 0 && Math.Sqrt((cx - heldX) * (cx - heldX) + (cy - heldY) * (cy - heldY)) / seen < CLICK_SLOP_PX)
                 input.PointerTo(heldX, heldY);
-            else { if (held) heldOn = null; input.PointerTo(cx, cy); }   // moved past the slop: follow (a drag), until the trigger is let go
+            else { if (held) heldOn = null; input.PointerTo(cx, cy); }   // moved past the slop: follow (a drag), until let go
         }
-        if (right.Window != null) return;   // while the right hand carries, its trigger and stick neither click nor scroll
-        // 1.10 (Tefa 2026-11-09: "use A instead of left trigger to use as a mouse left click basically, to tick and untick boxes"):
-        // A is the left button too (held = drag), beside the trigger; the right button is gone from the controllers
-        bool tNow = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;
-        bool aNow = (buttons & 1) != 0;
-        bool leftNow = (tNow || aNow) && !rightOnKeys;   // 1.12: on the keyboard the press is typed, never clicked as well
-        trigger = tNow; a = aNow;
-        if (leftNow != leftDown) { leftDown = leftNow; input.PointerLeft(leftNow); }
+        bool wantL = owner == KeysShared.RIGHT ? rL : owner == KeysShared.LEFT ? lL : false;
+        bool wantR = owner == KeysShared.RIGHT ? rR : owner == KeysShared.LEFT ? lR : false;
+        if (wantL != leftDown) { leftDown = wantL; input.PointerLeft(wantL); if (wantL) ClickFlash(owner, at, au, av, distance, room); }
+        if (wantR != rightDown) { rightDown = wantR; input.PointerRight(wantR); if (wantR) ClickFlash(owner, at, au, av, distance, room); }
+        if (!leftDown && !rightDown) owner = -1;
+        a = (buttons & 1) != 0;
+        if (right.Window != null) return;   // while the right hand carries, its stick neither scrolls nor recentres
         if (Math.Abs(stick) > STICK_DEAD) {                              // the right stick: the mouse wheel
             float amount = (Math.Abs(stick) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(stick);
             wheel += amount * WHEEL_NOTCHES_PER_S * dt;
@@ -218,10 +245,23 @@ class Pointer : IDisposable {
         y = yNow;
     }
 
+    // 1.13 (Tefa: "make all these windows act as well as the keyboard"): a click on a window gets the keyboard's own feedback,
+    // drawn and buzzed by the layer at once: a short green flash round the dot and one buzz in the clicking hand
+    void ClickFlash(int hand, Placement p, float u, float v, float distance, bool room) {
+        if (Keyboard == null || p == null || p.Slot < 0 || hand < 0) return;
+        V3 tip;
+        lock (desk.Lock) tip = WindowFrame.Of(p, distance, room).PointAt(u, v);
+        float size = CLICK_FLASH * Math.Max(0.3f, tip.Length);
+        Keyboard.Keys.WritePress(hand, p.Slot, tip, size, size);
+        LastAction = (hand == KeysShared.LEFT ? "left" : "right") + " hand clicked " + p.Title;
+    }
+
     // CONTROL mode went off: nothing stays held
     void Release() {
-        trigger = false; a = false;
+        trigger = false; a = false; ltrigger = false;
         rightOnKeys = false;
+        if (rightDown) { rightDown = false; input.PointerRight(false); }
+        owner = -1;
         if (Keyboard != null) Keyboard.Release();
         if (leftDown) { leftDown = false; input.PointerLeft(false); }
         lock (desk.Lock) {

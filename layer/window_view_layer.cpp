@@ -99,6 +99,7 @@ struct Session {
     XrQuaternionf slot_face[WINDOW_VIEW_SLOTS]{};   // each window's turn in the desk's frame, this frame
     // 1.12: the pointer keyboard: solid see-through squares (light, green flash, red flash), and each hand's last press
     Quad solid[3];
+    Quad dot[2], beam[2];                  // 1.13: the laser pointers (lasers.inl): red right, blue left
     LONG press_seen[2]{};
     bool press_known[2]{};
     ULONGLONG flash_until[2]{};
@@ -438,7 +439,9 @@ bool ensure_cursor(Session& s, XrSession xs, int kind) {
     return true;
 }
 void add_arrow(Session& s, XrSession xs, LONG slot, XrVector3f tip, int kind, bool room, std::vector<XrCompositionLayerQuad>& out);
+bool lasers_on(WindowViewShared* sh);
 void add_cursor(Session& s, XrSession xs, WindowViewShared* sh, bool room, std::vector<XrCompositionLayerQuad>& out) {
+    if (lasers_on(sh)) return;   // 1.13: the red dot and beam instead (lasers.inl)
     const LONG slot = sh->cursor_slot;
     if (!sh->cursor_visible || slot < 0 || slot >= WINDOW_VIEW_SLOTS) return;
     add_arrow(s, xs, slot, XrVector3f{sh->cursor_p[0], sh->cursor_p[1], sh->cursor_p[2]}, sh->cursor_edge ? 1 : 0, room, out);
@@ -465,6 +468,7 @@ void add_arrow(Session& s, XrSession xs, LONG slot, XrVector3f tip, int kind, bo
 }
 
 #include "keys.inl"   // 1.12: the pointer keyboard's lights, flashes, buzz and left arrow
+#include "lasers.inl"   // 1.13: the laser pointers
 
 // everything this frame: refresh changed pictures and list one quad per visible slot (the quads vector is reserved by
 // the caller so the pointers taken afterwards stay put)
@@ -549,6 +553,7 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
     }
     controller_frame(s, xs, sh, when, room);
     keys_frame(s, xs, sh, room, out);   // 1.12: the keyboard's lights, flashes, buzz and the left arrow (keys.inl)
+    lasers_frame(s, xs, sh, room, out);   // 1.13: the beams and dots (lasers.inl)
     add_cursor(s, xs, sh, room, out);
     if (!out.empty()) InterlockedIncrement(&sh->quads_submitted);
 }
@@ -557,6 +562,8 @@ void destroy_session_state(Session& s) {
     for (auto& q : s.quads) destroy_quad(s, q);
     for (auto& q : s.cursor) destroy_quad(s, q);
     for (auto& q : s.solid) destroy_quad(s, q);
+    for (auto& q : s.dot) destroy_quad(s, q);
+    for (auto& q : s.beam) destroy_quad(s, q);
     release(s.ctx);
     release(s.d11);
     release(s.fence);
@@ -608,7 +615,7 @@ XRAPI_ATTR XrResult XRAPI_CALL wv_xrDestroySession(XrSession session) {
 
 XRAPI_ATTR XrResult XRAPI_CALL wv_xrEndFrame(XrSession session, const XrFrameEndInfo* info) {
     std::vector<XrCompositionLayerQuad> quads;
-    quads.reserve(WINDOW_VIEW_SLOTS + 8);   // the windows, the pointer, and 1.12's key lights, flashes and left arrow
+    quads.reserve(WINDOW_VIEW_SLOTS + 16);   // 1.13: + two beams and two dots   // the windows, the pointer, and 1.12's key lights, flashes and left arrow
     if (info != nullptr) {
         std::lock_guard _{g_mtx};
         auto it = g_sessions.find(session);

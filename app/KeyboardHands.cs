@@ -14,6 +14,7 @@ class KeyboardHands {
 
     public KeyboardHands(KeysShared keys, TypingQueue queue, KeysUi ui) { this.keys = keys; this.queue = queue; this.ui = ui; }
     public float LTrigger { get { return keys.LTrigger; } }   // written by the layer (the main block has the right trigger only)
+    public KeysShared Keys { get { return keys; } }   // 1.13: the pointer loop writes the left dot and the lasers through it
 
     public static bool IsKeyboard(Placement p) {
         return p != null && p.Title == KeysUi.TITLE && p.Shown && p.Live && p.PicW > 0 && p.PicH > 0 && p.Slot >= 0;
@@ -27,15 +28,14 @@ class KeyboardHands {
             if (wasOn[hand]) hk.Reset();   // slid off, or the keyboard was hidden: a trigger still held types nothing later
             wasOn[hand] = false;
             keys.WriteLit(hand, false, -1, new V3(), 0, 0);
-            if (hand == KeysShared.LEFT) keys.WriteLeftCursor(false, new V3());
-            return false;
+            return false;   // 1.13: the left pointer off the keyboard is the pointer loop's (Pointer.cs) to draw
         }
         wasOn[hand] = true;
         var frame = WindowFrame.Of(p, distance, room);
         var ev = hk.Step(trigger, a, true, u * p.PicW, v * p.PicH, ui.KeyTable, nowMs);
         if (hk.Lit) { V3 c; float w, h; Place(p, frame, hk.LitKey, out c, out w, out h); keys.WriteLit(hand, true, p.Slot, c, w, h); }
         else keys.WriteLit(hand, false, -1, new V3(), 0, 0);
-        if (hand == KeysShared.LEFT) keys.WriteLeftCursor(true, frame.PointAt(u, v));
+        if (hand == KeysShared.LEFT) keys.WriteLeftCursor(true, frame.PointAt(u, v), p.Slot);
         if (ev.Pressed) {
             V3 c; float w, h; Place(p, frame, ev.Key, out c, out w, out h);
             if (ev.Key.Vk == KeysUi.ShiftVk) ui.ToggleShift();

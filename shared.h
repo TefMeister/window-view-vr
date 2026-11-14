@@ -125,7 +125,11 @@ struct WindowViewKeys {
     volatile LONG lit_drawn;         //  20  layer: frames with at least one key light drawn
     volatile LONG flash_drawn;       //  24  layer: frames with at least one press flash drawn
     WindowViewKeysHand hand[2];      //  28  0 = left, 1 = right
-    uint8_t pad[12];                 // 180
+    // 1.13 (Tefa 2026-11-14: "add left and right mouse to all and make the pointers dots with a laser line behind them. red for
+    // right, blue for left"): in the old padding, so the block keeps its size and name
+    volatile LONG lcursor_slot;      // 180  app: the window the left hand's pointer lies on (its cursor_p above), -1 = none
+    volatile LONG lasers;            // 184  app: 1 = in CONTROL mode draw a beam and a dot per hand instead of the arrows
+    volatile LONG rhit;              // 188  app: 1 = the right ray meets a window this frame (the main block's cursor_p is its dot)
 };                                   // 192 bytes
 #pragma pack(pop)
 static_assert(sizeof(WindowViewKeysHand) == 76, "the app reads this layout by offset");

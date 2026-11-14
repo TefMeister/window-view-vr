@@ -56,6 +56,15 @@ static partial class SelfTest {
             Check("left trigger read from its offset", k.LTrigger == 0.42f);
             k.WriteLeftCursor(true, new V3(1, 2, 3));
             Check("left cursor written", k.RawInt(KeysShared.HAND0 + KeysShared.H_CURSOR_VISIBLE) == 1 && k.RawFloat(KeysShared.HAND0 + KeysShared.H_CURSOR_P + 4) == 2f);
+            // 1.13: the laser pointers' fields, in the old padding at shared.h's offsets
+            k.WriteLeftCursor(true, new V3(0, 0, -1), 5);
+            Check("1.13 the left dot's window at 180", k.RawInt(180) == 5 && KeysShared.LCURSOR_SLOT == 180);
+            k.WriteLeftCursor(false, new V3());
+            Check("1.13 hiding the left dot keeps its window", k.RawInt(180) == 5 && k.RawInt(KeysShared.HAND0 + KeysShared.H_CURSOR_VISIBLE) == 0);
+            k.WriteLasers(true); k.WriteRightHit(true);
+            Check("1.13 lasers on at 184, the right hit at 188", k.RawInt(184) == 1 && k.RawInt(188) == 1);
+            k.WriteLasers(false); k.WriteRightHit(false);
+            Check("1.13 both off again", k.RawInt(184) == 0 && k.RawInt(188) == 0);
         }
     }
 

@@ -68,7 +68,7 @@ void keys_frame(Session& s, XrSession xs, WindowViewShared* sh, bool room, std::
         }
     }
     WindowViewKeysHand& left = k->hand[0];
-    if (left.cursor_visible && left.lit_slot >= 0) add_arrow(s, xs, left.lit_slot, XrVector3f{left.cursor_p[0], left.cursor_p[1], left.cursor_p[2]}, 0, room, out);
+    if (!lasers_on(sh) && left.cursor_visible && left.lit_slot >= 0) add_arrow(s, xs, left.lit_slot, XrVector3f{left.cursor_p[0], left.cursor_p[1], left.cursor_p[2]}, 0, room, out);
     if (lit) InterlockedIncrement(&k->lit_drawn);
     if (flashed) InterlockedIncrement(&k->flash_drawn);
 }

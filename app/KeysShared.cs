@@ -12,6 +12,7 @@ class KeysShared : IDisposable {
     public const int LTRIGGER = 8, HAPTIC_OK = 12, HAPTIC_FAIL = 16, LIT_DRAWN = 20, FLASH_DRAWN = 24, HAND0 = 28, HAND_SIZE = 76;
     public const int H_LIT_VISIBLE = 0, H_LIT_SLOT = 4, H_LIT_C = 8, H_LIT_W = 20, H_LIT_H = 24, H_PRESS_SEQ = 28, H_PRESS_OK = 32,
                      H_PRESS_SLOT = 36, H_PRESS_C = 40, H_PRESS_W = 52, H_PRESS_H = 56, H_CURSOR_VISIBLE = 60, H_CURSOR_P = 64;
+    public const int LCURSOR_SLOT = 180, LASERS = 184, RHIT = 188;   // 1.13: the laser pointers (shared.h)
     public const int LEFT = 0, RIGHT = 1;
     readonly MemoryMappedFile file;
     readonly MemoryMappedViewAccessor view;
@@ -53,13 +54,16 @@ class KeysShared : IDisposable {
         }
     }
     public void MarkLost(int hand) { lock (gate) view.Write(H(hand) + H_PRESS_OK, 0); }
-    public void WriteLeftCursor(bool visible, V3 tip) {
+    public void WriteLeftCursor(bool visible, V3 tip, int slot = -1) {
         lock (gate) {
             int o = H(LEFT);
-            if (visible) Vec(o + H_CURSOR_P, tip);
+            if (visible) { Vec(o + H_CURSOR_P, tip); if (slot >= 0) view.Write(LCURSOR_SLOT, slot); }
             view.Write(o + H_CURSOR_VISIBLE, visible ? 1 : 0);
         }
     }
+    // 1.13: beams and dots instead of arrows while the controllers work the windows; whether the right ray meets a window
+    public void WriteLasers(bool on) { view.Write(LASERS, on ? 1 : 0); }
+    public void WriteRightHit(bool hit) { view.Write(RHIT, hit ? 1 : 0); }
 
     // for the self-tests and the layer test: raw reads and writes at a byte offset
     public int RawInt(int off) { return view.ReadInt32(off); }

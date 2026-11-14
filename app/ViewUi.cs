@@ -183,6 +183,7 @@ class ViewUi : Form {
             Path.Combine(Path.GetDirectoryName(SettingsFile), "keys.log"));
         keys.Queue = typing;
         pointer.Keyboard = new KeyboardHands(keysShared, typing, keys);
+        keysShared.WriteLasers(true);   // 1.13: the laser beams and dots in CONTROL mode (lasers.inl)
         Shown += delegate { keys.Show(); InputRouter.KeyboardWindow = keys.Handle; Relink(); };
         Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
         ShowLayer();
@@ -257,7 +258,7 @@ class ViewUi : Form {
         uiTimer.Stop();
         if (pointer != null) pointer.Dispose();
         if (typing != null) typing.Dispose();
-        if (keysShared != null) keysShared.Dispose();
+        if (keysShared != null) { keysShared.WriteLasers(false); keysShared.Dispose(); }
         if (keys != null) { keys.AllowClose = true; keys.Close(); InputRouter.KeyboardWindow = IntPtr.Zero; }
         shared.CtrlMode = false;  // the game gets its controllers back
         input.Dispose();          // the mouse and keyboard always come back
