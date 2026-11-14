@@ -57,6 +57,11 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
 9. New in 1.7: three rows are always in the list. **Window View** itself, its own **Keyboard** and **Lanes** (the Windows
    Terminal window). Each has a Show box; they have no REMOVE. The keyboard types into the
    window you last clicked: point at a key and pull the trigger. Shift and Ctrl hold for the next key only.
+10. New in 1.12 (Tefa: *"an actual keyboard i can use my motion controller pointers in to type - like the one VD uses"*):
+   **both hands type**, each with its own pointer on the keyboard. The key under a pointer lights up at once, a press
+   flashes it (green; red if the key could not be delivered) and gives that hand a short buzz. A light pull counts (about a
+   third of the trigger), a resting finger never repeats, and keys are typed on a thread of their own, so none are lost or
+   held back. Every press is written to `%APPDATA%\WindowViewVR\keys.log` (the newest 2,000), so a lost one can be traced.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
@@ -97,6 +102,13 @@ Again for 1.9 on the dev PC with the OpenXR Simulator, 2026-11-02, `[verified-nu
 `input_test.py` all six PASS (it now hides the three rows 1.7 adds by itself, and stops before typing unless the desk
 pointer is on Notepad, so a test can never type into another window); `view_test.py` D3D11 and D3D12 PASS, and again with
 `--actions`, `--actions --game-only` and `--room`.
+
+For 1.12 on the Developer PC with the OpenXR Simulator, 2026-11-14, `[verified-numerically 2026-11-14, n=1 each]`:
+`WindowView.exe --selftest-keys` 48 checks PASS (the keys block, the key map, the press catcher, the typing thread, both
+hands wired); `view_test.py` D3D11 and D3D12 PASS plain, `--actions`, `--keys`, `--actions --ctrl --keys` (29 of 29
+buzzes accepted) and `--room --keys`; `keys_test.py` PASS: VR Bench's pretend hands typed "hello world", "vr keys" left /
+right in turn, ten keys at a light pull and one after a 5 s pause into a throwaway terminal, every key once and in order,
+0 to 31 ms from pull to arrival (the clock ticks every 16 ms), none lost. Not yet worn in a headset.
 
 For 1.11 on the home PC, 2026-11-12, `[verified-numerically 2026-11-12, n=1 each]`: `view_test.py` D3D11 and D3D12 PASS.
 The terminal typing on its own (a small test program built on `app/ConsoleInput.cs`, two Claude Code windows open, one

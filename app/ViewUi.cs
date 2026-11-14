@@ -58,6 +58,8 @@ class ViewUi : Form {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr l);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")] static extern int TitleOf(IntPtr hwnd, System.Text.StringBuilder s, int n);
+    [DllImport("user32.dll", EntryPoint = "GetAncestor")] static extern IntPtr RootOf(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] static extern int GetWindowText(IntPtr hwnd, StringBuilder s, int n);
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
@@ -573,9 +575,41 @@ class ViewUi : Form {
         return panel;
     }
 
+    // 1.12, tests only (--dump-keys <file>, test/keys_test.py): where each keyboard key's centre hangs (the desk's frame),
+    // and which window the keys would go to now, so the test aims the controllers at real keys and refuses to type unless
+    // the target is its own throwaway terminal
+    public static string DumpKeysPath;
+    void DumpKeys() {
+        try {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            var sb = new System.Text.StringBuilder("{");
+            IntPtr t = input.KeyTarget();
+            var tsb = new System.Text.StringBuilder(256);
+            if (t != IntPtr.Zero) TitleOf(RootOf(t, 2), tsb, 256);
+            sb.Append("\"target_title\": \"" + tsb.ToString().Replace("\\", "\\\\").Replace("\"", "'") + "\", \"keys\": {");
+            lock (desk.Lock) {
+                Placement kb = null;
+                foreach (var p in desk.Windows) if (KeyboardHands.IsKeyboard(p)) kb = p;
+                if (kb != null) {
+                    var f = WindowFrame.Of(kb, shared.Distance > 0.01f ? shared.Distance : 1f, shared.RoomMode);
+                    bool first = true;
+                    foreach (var k in keys.KeyTable) {
+                        var c = f.PointAt((k.X + k.W / 2f) / kb.PicW, (k.Y + global::Capture.HEADER + k.H / 2f) / kb.PicH);
+                        sb.Append((first ? "" : ", ") + string.Format(ci, "\"{0}\": [{1}, {2}, {3}]", k.Vk, c.X, c.Y, c.Z));
+                        first = false;
+                    }
+                }
+            }
+            sb.Append("}}");
+            File.WriteAllText(DumpKeysPath + ".tmp", sb.ToString());
+            File.Copy(DumpKeysPath + ".tmp", DumpKeysPath, true);
+        } catch (Exception) { }
+    }
+
     // ---- every half second ---------------------------------------------------------------------------------------
     void Tick() {
         if (Environment.TickCount - lastRelink > 1000) { lastRelink = Environment.TickCount; Relink(); }
+        if (DumpKeysPath != null) DumpKeys();
         string game = shared.GameConnected ? "Connected: " + shared.GameName + " (" + Api.Name(shared.GameApi) + "), " + shared.Uploads + " pictures sent" : "No game connected";
         if (shared.GameConnected && shared.RoomMode) game += shared.AnchorSet ? ", windows in the room" : ", placing the windows...";
         if (shared.GameConnected) game += shared.PointerReady == 1 ? (shared.CtrlMode ? "\nCONTROLLERS ON THE WINDOWS: trigger clicks, grip carries, left stick click = back to the game" : "\nLeft stick click: the controllers work the windows")
