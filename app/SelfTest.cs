@@ -18,6 +18,7 @@ static partial class SelfTest {
         var groups = new Dictionary<string, Action> {
             {"keys-block", KeysBlock},
             {"keymap", KeyMapChecks},
+            {"handkeys", HandKeysChecks},
         };
         foreach (var g in groups) {
             if (what != "all" && what != g.Key) continue;
@@ -75,5 +76,46 @@ static partial class SelfTest {
             ui.ToggleCtrl(); ui.ToggleCtrl(); ui.TakeMods(out s, out c);
             Check("Ctrl pressed twice is off again", !c);
         }
+    }
+
+    // ---- Task 3: one hand's press detector -------------------------------------------------------------------------------
+    static readonly KeyRect[] QW = { new KeyRect { X = 8, Y = 8, W = 46, H = 40, Vk = 'Q' }, new KeyRect { X = 58, Y = 8, W = 46, H = 40, Vk = 'W' } };
+    const float QX = 31, WX = 81, KY = 8 + Capture.HEADER + 20;
+    // steps one hand through (trigger, A, x) samples on the keyboard; returns the keys pressed, as a string
+    static string Pulls(HandKeys h, params object[] samples) {
+        string got = ""; int t = 0;
+        for (int i = 0; i < samples.Length; i += 3) {
+            var e = h.Step((float)(double)samples[i], (bool)samples[i + 1], true, (float)(double)samples[i + 2], KY, QW, t += 11);
+            if (e.Pressed) got += (char)e.Key.Vk;
+        }
+        return got;
+    }
+    static void HandKeysChecks() {
+        Check("(a) a light pull to 0.4 presses the key", Pulls(new HandKeys(1), 0.0, false, (double)QX, 0.4, false, (double)QX) == "Q");
+        Check("(b) a pull to 0.3 presses nothing", Pulls(new HandKeys(1), 0.0, false, (double)QX, 0.3, false, (double)QX, 0.0, false, (double)QX) == "");
+        Check("(c) wobbling above 0.2 presses once", Pulls(new HandKeys(1), 0.0, false, (double)QX, 0.5, false, (double)QX, 0.3, false, (double)QX,
+              0.5, false, (double)QX, 0.36, false, (double)QX) == "Q");
+        Check("(d) the key touched first is the one pressed", Pulls(new HandKeys(1), 0.0, false, (double)QX, 0.15, false, (double)QX,
+              0.15, false, (double)WX, 0.5, false, (double)WX) == "Q");
+        Check("(e) A twice is two presses", Pulls(new HandKeys(1), 0.0, true, (double)WX, 0.0, false, (double)WX, 0.0, true, (double)WX, 0.0, false, (double)WX) == "WW");
+        var l = new HandKeys(0); var r = new HandKeys(1);
+        l.Step(0, false, true, QX, KY, QW, 0); r.Step(0, false, true, QX, KY, QW, 0);
+        var el = l.Step(0.4f, false, true, QX, KY, QW, 11); var er = r.Step(0.4f, false, true, QX, KY, QW, 11);
+        Check("(f) both hands on Q at once: two presses, hands 0 and 1", el.Pressed && er.Pressed && el.Hand == 0 && er.Hand == 1 && el.Key.Vk == 'Q' && er.Key.Vk == 'Q');
+        var g = new HandKeys(1);
+        g.Step(0, false, true, QX, KY, QW, 0); g.Step(0.5f, false, true, QX, KY, QW, 11);
+        g.Reset();
+        bool litAfterReset = g.Lit;
+        var eg = g.Step(0.5f, false, true, QX, KY, QW, 22);
+        var eg2 = g.Step(0.6f, false, true, QX, KY, QW, 33);
+        Check("(g) Reset clears the light, and a trigger still held presses nothing", !litAfterReset && !eg.Pressed && !eg2.Pressed);
+        g.Step(0.1f, false, true, QX, KY, QW, 44);
+        Check("(g) once let go, the next pull presses again", g.Step(0.5f, false, true, QX, KY, QW, 55).Pressed);
+        var lit = new HandKeys(1); lit.Step(0, false, true, WX, KY, QW, 0);
+        Check("the key under the pointer is lit", lit.Lit && lit.LitKey.Vk == 'W');
+        var off = new HandKeys(1); var eo = off.Step(0.9f, false, false, QX, KY, QW, 0);
+        Check("off the keyboard nothing is lit or pressed", !eo.Pressed && !off.Lit);
+        Check("a resting finger at 0.34-0.36 presses once", Pulls(new HandKeys(1), 0.0, false, (double)QX, 0.36, false, (double)QX, 0.34, false, (double)QX,
+              0.36, false, (double)QX, 0.34, false, (double)QX, 0.36, false, (double)QX) == "Q");
     }
 }
