@@ -89,8 +89,10 @@ its stick pushes and pulls it); its ray points at nothing there and draws no arr
 
 ### 3. The instant parts, drawn by the layer (`shared.h`, `layer/window_view_layer.cpp`, `layer/controllers.inl`)
 
-New fields in the shared header (layout bump: `WINDOW_VIEW_VERSION 3`, mapping name `..._v3`, header size grows; the
-app's offsets in `WindowView.cs` change with it):
+New fields, in a **second, separate shared block** `Local\FlatToVR_WindowView_keys_v1` (`WindowViewKeys` in
+`shared.h`). Changed while planning, 2026-11-14: the main block `Local\FlatToVR_WindowView_v2` is also opened by name
+and size by Hand Poser, Grip Zones, Gun Poser, Animation & Timing (`Nudge.cs`) and the Village mod (`sleephands.cpp`), so
+renaming or growing it would break all of them. The main block stays exactly as it is. The new block holds:
 
 - `ltrigger`: the LEFT trigger 0..1, written by the layer (today only the left grip and stick are shared; the layer's
   action set gains a left trigger action).
