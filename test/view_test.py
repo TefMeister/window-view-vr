@@ -12,10 +12,17 @@ LOOKS like is checked by eye with the simulator's screenshot (the MCP capture_sc
 controller actions were attached beside them. --ctrl: CONTROL mode on from the start (the game's hands held).
 --game-only (1.6): the app's CONTROLLERS switch on "game only" (a settings.txt of the test's own, through APPDATA for the
 stand-in game alone); with --actions, PASS only when the game's actions all worked and the layer added none of its own.
+--keys (1.12): the test plays the app's half of the pointer keyboard (the keys block): a key lit for each hand and a press
+every 0.3 s (every other one marked lost); PASS also only when the layer drew lights and flashes, and with --actions --ctrl
+when it buzzed (haptic_ok rose, haptic_fail stayed 0).
 Exit 0 = every requested API passed.
 """
 import argparse
 import json
+import mmap
+import struct
+import threading
+import time
 import os
 import subprocess
 import sys
@@ -40,7 +47,41 @@ def find_loader():
     return None
 
 
+KEYS_NAME = r"Local\FlatToVR_WindowView_keys_v1"
+KEYS_SIZE, HAND0, HAND_SIZE = 192, 28, 76
+
+
+class FakeKeys(threading.Thread):
+    """the app's half of the keys block (shared.h WindowViewKeys): lights on slot 0 for both hands, a press every 0.3 s"""
+    def __init__(self, seconds):
+        super().__init__(daemon=True)
+        self.m = mmap.mmap(-1, KEYS_SIZE, tagname=KEYS_NAME)
+        self.m[0:8] = struct.pack("<II", 0x5359454B, 1)
+        self.m[12:28] = bytes(16)   # the layer's counters from zero
+        self.end = time.time() + seconds
+        for h in (0, 1):
+            o = HAND0 + h * HAND_SIZE
+            self.m[o + 4:o + 28] = struct.pack("<i5f", 0, 0.0, 0.0, -1.0, 0.05, 0.04)
+            self.m[o:o + 4] = struct.pack("<i", 1)
+    def run(self):
+        n = 0
+        while time.time() < self.end:
+            time.sleep(0.3)
+            h = n % 2
+            o = HAND0 + h * HAND_SIZE
+            self.m[o + 32:o + 60] = struct.pack("<ii5f", 1 if n % 4 < 2 else 0, 0, 0.0, 0.0, -1.0, 0.05, 0.04)
+            seq = struct.unpack("<i", self.m[o + 28:o + 32])[0]
+            self.m[o + 28:o + 32] = struct.pack("<i", seq + 1)
+            n += 1
+    def counters(self):
+        return dict(zip(("haptic_ok", "haptic_fail", "lit_drawn", "flash_drawn"), struct.unpack("<iiii", self.m[12:28])))
+
+
 def run_one(api, args, env):
+    keys = None
+    if args.keys:
+        keys = FakeKeys(args.seconds + 1)
+        keys.start()
     fake = [sys.executable, "-I", os.path.join(HERE, "fake_window.py"), "--seconds", str(args.seconds + 2)]
     if args.resize:
         fake.append("--resize")
@@ -72,6 +113,13 @@ def run_one(api, args, env):
             checks["the layer left the controllers to the game"] = int(got.get("pointer_ready", 0)) == -2
         else:
             checks["the layer's controller actions attached beside them"] = int(got.get("pointer_ready", 0)) == 1
+    if keys is not None:
+        c = keys.counters()
+        print("KEYS: " + " ".join("%s=%d" % kv for kv in c.items()))
+        checks["the layer lit the keys"] = c["lit_drawn"] >= 1
+        checks["the layer flashed the presses"] = c["flash_drawn"] >= 1
+        if args.actions and args.ctrl:
+            checks["the layer buzzed the hands"] = c["haptic_ok"] >= 1 and c["haptic_fail"] == 0
     for name, ok in checks.items():
         print(("  ok   " if ok else "  FAIL ") + name)
     return all(checks.values())
@@ -90,6 +138,7 @@ def main():
     ap.add_argument("--actions", action="store_true")
     ap.add_argument("--ctrl", action="store_true")
     ap.add_argument("--game-only", action="store_true")
+    ap.add_argument("--keys", action="store_true")
     args = ap.parse_args()
     if not args.loader:
         sys.exit("no openxr_loader.dll found; pass --loader")

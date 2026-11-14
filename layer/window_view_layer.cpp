@@ -97,6 +97,11 @@ struct Session {
     XrSpace left_aim_space = XR_NULL_HANDLE;   // the left controller's (it carries windows too)
     Quad cursor[2];                        // the pointer: white over a window, yellow between windows
     XrQuaternionf slot_face[WINDOW_VIEW_SLOTS]{};   // each window's turn in the desk's frame, this frame
+    // 1.12: the pointer keyboard: solid see-through squares (light, green flash, red flash), and each hand's last press
+    Quad solid[3];
+    LONG press_seen[2]{};
+    bool press_known[2]{};
+    ULONGLONG flash_until[2]{};
     Quad quads[WINDOW_VIEW_SLOTS];
     std::vector<uint8_t> staging;
 };
@@ -140,6 +145,23 @@ const uint8_t* slot_pixels(int slot) {
 }
 
 void note_error(LONG code) { auto* s = shared(); if (s != nullptr && code != 0) s->last_error = code; }
+
+// 1.12: the pointer keyboard's block (shared.h WindowViewKeys), made by the app; nullptr until it exists (looked for again
+// every so often), so an older app simply has no key lights
+WindowViewKeys* g_keys = nullptr;
+int g_keys_retry = 0;
+WindowViewKeys* keys_block() {
+    if (g_keys != nullptr) return g_keys;
+    if (g_keys_retry-- > 0) return nullptr;
+    g_keys_retry = kRetryEveryFrames;
+    HANDLE h = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, WINDOW_VIEW_KEYS_MAPPING_NAME);
+    if (h == nullptr) return nullptr;
+    auto* p = static_cast<WindowViewKeys*>(MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(WindowViewKeys)));
+    if (p == nullptr) { CloseHandle(h); return nullptr; }
+    if (p->magic != WINDOW_VIEW_KEYS_MAGIC) { UnmapViewOfFile(p); CloseHandle(h); return nullptr; }
+    g_keys = p;   // kept open for the life of the process, like the main block
+    return p;
+}
 
 void heartbeat(WindowViewShared* s, LONG api) {
     s->layer_heartbeat_ms = GetTickCount64();
@@ -415,12 +437,15 @@ bool ensure_cursor(Session& s, XrSession xs, int kind) {
     q.shown_frame = 0;
     return true;
 }
+void add_arrow(Session& s, XrSession xs, LONG slot, XrVector3f tip, int kind, bool room, std::vector<XrCompositionLayerQuad>& out);
 void add_cursor(Session& s, XrSession xs, WindowViewShared* sh, bool room, std::vector<XrCompositionLayerQuad>& out) {
     const LONG slot = sh->cursor_slot;
     if (!sh->cursor_visible || slot < 0 || slot >= WINDOW_VIEW_SLOTS) return;
-    const int kind = sh->cursor_edge ? 1 : 0;
+    add_arrow(s, xs, slot, XrVector3f{sh->cursor_p[0], sh->cursor_p[1], sh->cursor_p[2]}, sh->cursor_edge ? 1 : 0, room, out);
+}
+// one arrow on window `slot` with its tip at `tip` (the desk's frame); 1.12: also the left hand's arrow on the keyboard
+void add_arrow(Session& s, XrSession xs, LONG slot, XrVector3f tip, int kind, bool room, std::vector<XrCompositionLayerQuad>& out) {
     if (!ensure_cursor(s, xs, kind)) return;
-    const XrVector3f tip{sh->cursor_p[0], sh->cursor_p[1], sh->cursor_p[2]};
     const float dist = std::sqrt(tip.x * tip.x + tip.y * tip.y + tip.z * tip.z);
     const float size = kCursorSize * (dist > 0.05f ? dist : 1.0f);
     const XrQuaternionf face = s.slot_face[slot];
@@ -438,6 +463,8 @@ void add_cursor(Session& s, XrSession xs, WindowViewShared* sh, bool room, std::
     l.size = {size, size};
     out.push_back(l);   // last: on top of every window
 }
+
+#include "keys.inl"   // 1.12: the pointer keyboard's lights, flashes, buzz and left arrow
 
 // everything this frame: refresh changed pictures and list one quad per visible slot (the quads vector is reserved by
 // the caller so the pointers taken afterwards stay put)
@@ -521,6 +548,7 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         std::stable_sort(out.begin(), out.end(), [&](const XrCompositionLayerQuad& a, const XrCompositionLayerQuad& b) { return far2(a) > far2(b); });
     }
     controller_frame(s, xs, sh, when, room);
+    keys_frame(s, xs, sh, room, out);   // 1.12: the keyboard's lights, flashes, buzz and the left arrow (keys.inl)
     add_cursor(s, xs, sh, room, out);
     if (!out.empty()) InterlockedIncrement(&sh->quads_submitted);
 }
@@ -528,6 +556,7 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
 void destroy_session_state(Session& s) {
     for (auto& q : s.quads) destroy_quad(s, q);
     for (auto& q : s.cursor) destroy_quad(s, q);
+    for (auto& q : s.solid) destroy_quad(s, q);
     release(s.ctx);
     release(s.d11);
     release(s.fence);
@@ -579,7 +608,7 @@ XRAPI_ATTR XrResult XRAPI_CALL wv_xrDestroySession(XrSession session) {
 
 XRAPI_ATTR XrResult XRAPI_CALL wv_xrEndFrame(XrSession session, const XrFrameEndInfo* info) {
     std::vector<XrCompositionLayerQuad> quads;
-    quads.reserve(WINDOW_VIEW_SLOTS);
+    quads.reserve(WINDOW_VIEW_SLOTS + 8);   // the windows, the pointer, and 1.12's key lights, flashes and left arrow
     if (info != nullptr) {
         std::lock_guard _{g_mtx};
         auto it = g_sessions.find(session);
@@ -639,6 +668,7 @@ void fetch_next(XrInstance instance) {
     get("xrSuggestInteractionProfileBindings", g_next_suggest);
     get("xrAttachSessionActionSets", g_next_attach);
     get("xrSyncActions", g_next_sync);
+    get("xrApplyHapticFeedback", g_next_apply_haptic);
     get("xrGetActionStateBoolean", g_next_state_bool);
     get("xrGetActionStateFloat", g_next_state_float);
     get("xrGetActionStateVector2f", g_next_state_vec2);

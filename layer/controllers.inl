@@ -23,6 +23,7 @@ PFN_xrCreateAction g_next_create_action = nullptr;
 PFN_xrSuggestInteractionProfileBindings g_next_suggest = nullptr;
 PFN_xrAttachSessionActionSets g_next_attach = nullptr;
 PFN_xrSyncActions g_next_sync = nullptr;
+PFN_xrApplyHapticFeedback g_next_apply_haptic = nullptr;   // 1.12: the keyboard's buzz
 PFN_xrGetActionStateBoolean g_next_state_bool = nullptr;
 PFN_xrGetActionStateFloat g_next_state_float = nullptr;
 PFN_xrGetActionStateVector2f g_next_state_vec2 = nullptr;
@@ -55,7 +56,9 @@ bool controllers_allowed() {
     if (at != nullptr && (at == buf || at[-1] == '\n') && at[12] == '0') allowed = 0;
     return allowed != 0;
 }
-enum { A_LCLICK, A_RCLICK, A_TRIGGER, A_SQUEEZE, A_STICK, A_AIM, A_A, A_B, A_Y, A_LSQUEEZE, A_LSTICK, A_LAIM, A_X, A_COUNT };
+enum { A_LCLICK, A_RCLICK, A_TRIGGER, A_SQUEEZE, A_STICK, A_AIM, A_A, A_B, A_Y, A_LSQUEEZE, A_LSTICK, A_LAIM, A_X,
+       A_LTRIGGER, A_LHAPTIC, A_RHAPTIC,   // 1.12: the left hand types too, and both hands feel a press
+       A_COUNT };
 XrAction g_act[A_COUNT]{};
 
 // the game's controller spaces and inputs, held while CONTROL mode is on (both hands, everything the game asks for)
@@ -99,6 +102,9 @@ bool make_actions() {
         {"wv_left_stick", "WV left stick", XR_ACTION_TYPE_VECTOR2F_INPUT},
         {"wv_left_aim", "WV left aim", XR_ACTION_TYPE_POSE_INPUT},
         {"wv_x", "WV X", XR_ACTION_TYPE_BOOLEAN_INPUT},
+        {"wv_left_trigger", "WV left trigger", XR_ACTION_TYPE_FLOAT_INPUT},
+        {"wv_left_buzz", "WV left buzz", XR_ACTION_TYPE_VIBRATION_OUTPUT},
+        {"wv_right_buzz", "WV right buzz", XR_ACTION_TYPE_VIBRATION_OUTPUT},
     };
     for (int i = 0; i < A_COUNT; ++i) {
         XrActionCreateInfo ai{XR_TYPE_ACTION_CREATE_INFO};
@@ -131,6 +137,9 @@ std::vector<XrActionSuggestedBinding> our_bindings(XrPath profile) {
     add(A_LSTICK, "/user/hand/left/input/thumbstick");
     add(A_LAIM, "/user/hand/left/input/aim/pose");
     add(A_X, touch ? "/user/hand/left/input/x/click" : "/user/hand/left/input/a/click");
+    add(A_LTRIGGER, "/user/hand/left/input/trigger/value");
+    add(A_LHAPTIC, "/user/hand/left/output/haptic");
+    add(A_RHAPTIC, "/user/hand/right/output/haptic");
     return out;
 }
 
@@ -351,7 +360,9 @@ void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime whe
     const bool click = read_bool(xs, A_LCLICK);
     if (!click && s.both_was) sh->ctrl_mode = sh->ctrl_mode ? 0 : 1;
     s.both_was = click;
-    if (sh->ctrl_mode == 0) { sh->ray_valid = 0; sh->lray_valid = 0; sh->buttons = 0; return; }
+    WindowViewKeys* kb = keys_block();   // 1.12: the left trigger, for typing with the left hand
+    if (sh->ctrl_mode == 0) { sh->ray_valid = 0; sh->lray_valid = 0; sh->buttons = 0; if (kb != nullptr) kb->ltrigger = 0.0f; return; }
+    if (kb != nullptr) kb->ltrigger = read_float(xs, A_LTRIGGER);
     XrVector3f o{}, d{};
     if (!aim_ray(s, xs, g_act[A_AIM], s.aim_space, when, room, o, d)) { sh->ray_valid = 0; return; }
     sh->ray_o[0] = o.x; sh->ray_o[1] = o.y; sh->ray_o[2] = o.z;
@@ -369,4 +380,20 @@ void controller_frame(Session& s, XrSession xs, WindowViewShared* sh, XrTime whe
     sh->buttons = (read_bool(xs, A_A) ? 1 : 0) | (read_bool(xs, A_Y) ? 2 : 0) | (read_bool(xs, A_B) ? 4 : 0) | (read_bool(xs, A_X) ? 8 : 0);
     sh->ray_valid = 1;
     InterlockedIncrement(&sh->ray_seq);
+}
+
+// 1.12: one short buzz in a hand (0 = left, 1 = right) for a key press; false = the runtime refused it
+constexpr int64_t kBuzzNs = 20'000'000;   // 20 ms
+constexpr float kBuzzAmplitude = 0.5f;
+bool buzz(Session& s, XrSession xs, int hand) {
+    if (!s.ours_attached || g_next_apply_haptic == nullptr) return false;
+    XrHapticActionInfo hi{XR_TYPE_HAPTIC_ACTION_INFO};
+    hi.action = g_act[hand == 0 ? A_LHAPTIC : A_RHAPTIC];
+    XrHapticVibration v{XR_TYPE_HAPTIC_VIBRATION};
+    v.duration = kBuzzNs;
+    v.frequency = XR_FREQUENCY_UNSPECIFIED;
+    v.amplitude = kBuzzAmplitude;
+    const XrResult r = g_next_apply_haptic(xs, &hi, reinterpret_cast<const XrHapticBaseHeader*>(&v));
+    if (XR_FAILED(r)) { note_error(r); return false; }
+    return true;
 }
