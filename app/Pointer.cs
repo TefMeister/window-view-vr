@@ -176,7 +176,7 @@ class Pointer : IDisposable {
         // 1.10 (Tefa 2026-11-09): the helpers now use Y / B (undo, redo), X (clear the ticks) and the right stick (the steps), and
         // A is everyone's left click: while one claims them, only A and the trigger click here, the stick does not scroll, the
         // grips still carry
-        if (claimed) { buttons &= 1; stick = 0; }
+        if (claimed) { buttons &= 1 | 8; stick = 0; }   // 1.13: A and X (the clicks) stay ours; the helpers use Y only now
         Placement hover; float hu = 0, hv = 0;
         Placement lh = null; float lu = 0, lv = 0;
         bool leftOnKeys = false;
@@ -212,13 +212,13 @@ class Pointer : IDisposable {
         bool lTrig = ltrigger ? ltrig > TRIGGER_UP : ltrig > TRIGGER_DOWN;
         trigger = rTrig; ltrigger = lTrig;
         bool rL = rFree && rTrig, rR = rFree && (buttons & 1) != 0;
-        bool lL = lFree && lTrig, lR = lFree && !claimed && (buttons & 8) != 0;
+        bool lL = lFree && lTrig, lR = lFree && (buttons & 8) != 0;
         if (owner < 0) owner = rL || rR ? KeysShared.RIGHT : lL || lR ? KeysShared.LEFT : -1;
         // where the mouse is: the owning hand's dot, held still from the first touch of its trigger or button (1.8's slop),
         // else the right hand's (hover effects follow the right pointer)
         bool useLeft = owner == KeysShared.LEFT;
         Placement at = useLeft ? lh : hover; float au = useLeft ? lu : hu, av = useLeft ? lv : hv;
-        bool touch = useLeft ? (ltrig > TRIGGER_TOUCH || (!claimed && (buttons & 8) != 0)) : (right.Window == null && (trig > TRIGGER_TOUCH || (buttons & 1) != 0));
+        bool touch = useLeft ? (ltrig > TRIGGER_TOUCH || (buttons & 8) != 0) : (right.Window == null && (trig > TRIGGER_TOUCH || (buttons & 1) != 0));
         if (at != null) {
             float cx, cy, seen;
             lock (desk.Lock) { cx = at.Left + au * at.PicW * at.Seen; cy = at.Top - av * at.PicH * at.Seen; seen = at.Seen; }
