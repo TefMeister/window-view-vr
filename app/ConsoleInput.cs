@@ -91,6 +91,47 @@ static class ConsoleInput {
         }
     }
 
+    // ---- 1.12: the typing thread's way in (TypingQueue.cs) ---------------------------------------------------------------
+    // the program behind each terminal window, looked up only by Refresh (when the window or its title changes, or after a
+    // failed write) and kept with no time limit: a key never waits for a lookup
+    static readonly Dictionary<IntPtr, uint> warm = new Dictionary<IntPtr, uint>();
+
+    public static void Refresh(IntPtr hwnd) {
+        lock (gate) {
+            IntPtr root = GetAncestor(hwnd, GA_ROOT);
+            var tsb = new StringBuilder(256);
+            GetWindowText(root, tsb, 256);
+            uint pid = FindProgram(root, tsb.ToString());
+            if (pid != 0) warm[root] = pid; else warm.Remove(root);
+        }
+    }
+
+    // every key in one write into the program's console, in order (each pressed and let go)
+    public static bool TypeMany(IntPtr hwnd, ConsoleKey[] keys, out string why) {
+        lock (gate) {
+            IntPtr root = GetAncestor(hwnd, GA_ROOT);
+            uint pid;
+            if (!warm.TryGetValue(root, out pid)) { why = "the terminal's program is not looked up yet"; return false; }
+            var recs = new INPUT_RECORD[keys.Length * 2];
+            for (int i = 0; i < keys.Length; ++i) {
+                var k = keys[i];
+                char ch = k.Ch;
+                if (k.Ctrl && ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 1);
+                else if (k.Ctrl && ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 1);
+                uint state = (k.Shift ? SHIFT_PRESSED : 0) | (k.Ctrl ? LEFT_CTRL_PRESSED : 0) | (k.Ext ? ENHANCED_KEY : 0);
+                for (int j = 0; j < 2; ++j) {
+                    recs[i * 2 + j].EventType = KEY_EVENT;
+                    recs[i * 2 + j].Key = new KEY_EVENT_RECORD { KeyDown = j == 0 ? 1 : 0, Repeat = 1, Vk = (ushort)k.Vk, Scan = (ushort)k.Scan, Char = ch, Control = state };
+                }
+            }
+            uint n = 0;
+            bool ok = WithConsole(pid, h => WriteConsoleInput(h, recs, (uint)recs.Length, out n) && n == recs.Length);
+            why = ok ? "" : "could not write into program " + pid + " (" + n + " of " + recs.Length + " records)";
+            if (!ok) warm.Remove(root);
+            return ok;
+        }
+    }
+
     // The terminal's own children (not its OpenConsole.exe hosts) that belong to THIS window, then the active tab among them.
     // 1.11 (2026-11-12, Tefa: typing into a clicked Claude window did not work): one WindowsTerminal.exe hosts EVERY terminal
     // window, so its children are the programs of all of them, and 1.7.1 told them apart by title alone, falling back to the
@@ -156,4 +197,11 @@ static class ConsoleInput {
             FreeConsole();
         }
     }
+}
+
+// 1.12: one key as a console key record wants it (InputRouter.Resolve makes them)
+struct ConsoleKey {
+    public uint Vk, Scan;
+    public char Ch;
+    public bool Ext, Shift, Ctrl;
 }

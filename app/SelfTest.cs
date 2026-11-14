@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 
 static partial class SelfTest {
     static int fails, passes;
@@ -19,6 +20,7 @@ static partial class SelfTest {
             {"keys-block", KeysBlock},
             {"keymap", KeyMapChecks},
             {"handkeys", HandKeysChecks},
+            {"typing", TypingChecks},
         };
         foreach (var g in groups) {
             if (what != "all" && what != g.Key) continue;
@@ -117,5 +119,75 @@ static partial class SelfTest {
         Check("off the keyboard nothing is lit or pressed", !eo.Pressed && !off.Lit);
         Check("a resting finger at 0.34-0.36 presses once", Pulls(new HandKeys(1), 0.0, false, (double)QX, 0.36, false, (double)QX, 0.34, false, (double)QX,
               0.36, false, (double)QX, 0.34, false, (double)QX, 0.36, false, (double)QX) == "Q");
+    }
+
+    // ---- Task 4: the typing thread, the warm lookup and the press log ------------------------------------------------------
+    // a stand-in for the terminal: records every call; can be held busy, or made to fail
+    class FakeSink : IKeySink {
+        public readonly List<string> Writes = new List<string>();
+        public readonly List<IntPtr> Refreshes = new List<IntPtr>();
+        public int FailNext;            // this many writes fail, then they work (int.MaxValue = always)
+        public ManualResetEvent Gate = new ManualResetEvent(true);   // reset = the next write waits here
+        public ManualResetEvent Entered = new ManualResetEvent(false);
+        public bool Write(IntPtr target, KeyStroke[] keys, out string why) {
+            Entered.Set();
+            Gate.WaitOne(5000);
+            var sb = new System.Text.StringBuilder();
+            foreach (var k in keys) sb.Append((char)k.Vk);
+            lock (Writes) Writes.Add(sb.ToString());
+            if (FailNext > 0) { FailNext--; why = "the stand-in refused"; return false; }
+            why = ""; return true;
+        }
+        public void Refresh(IntPtr target) { lock (Refreshes) Refreshes.Add(target); }
+    }
+    static KeyStroke Ks(char c, int hand) { return new KeyStroke { Vk = c, Hand = hand, PressMs = Environment.TickCount }; }
+    static string TempLog() { string f = Path.Combine(Path.GetTempPath(), "wv_keys_selftest_" + Guid.NewGuid().ToString("N") + ".log"); return f; }
+
+    static void TypingChecks() {
+        // (a) + (b): a burst while the terminal is busy goes in ONE write, in the order pressed (left, right, left)
+        var sink = new FakeSink(); var lost = new List<int>(); string log = TempLog();
+        using (var q = new TypingQueue(sink, () => new IntPtr(42), h => { lock (lost) lost.Add(h); }, log)) {
+            sink.Gate.Reset();
+            q.Add(Ks('X', 1));
+            sink.Entered.WaitOne(2000);
+            q.Add(Ks('A', 0)); q.Add(Ks('B', 1)); q.Add(Ks('C', 0));
+            sink.Gate.Set();
+            q.Flush(2000);
+            string w; lock (sink.Writes) w = string.Join("|", sink.Writes.ToArray());
+            Check("(a) a burst while busy goes in one write", w == "X|ABC", "writes: " + w);
+            Check("(b) left / right / left keep their order", w.EndsWith("ABC"));
+        }
+        // (c) a write that fails once: one fresh lookup, then it works; logged as retried
+        sink = new FakeSink { FailNext = 1 }; log = TempLog(); lost.Clear();
+        using (var q = new TypingQueue(sink, () => new IntPtr(42), h => { lock (lost) lost.Add(h); }, log)) {
+            int r0; lock (sink.Refreshes) r0 = sink.Refreshes.Count;
+            q.Add(Ks('Q', 1)); q.Flush(2000);
+            int r1; lock (sink.Refreshes) r1 = sink.Refreshes.Count;
+            Check("(c) a failed write is looked up again and retried once", sink.Writes.Count == 2 && r1 - r0 >= 1 && lost.Count == 0, "writes " + sink.Writes.Count + ", refreshes " + (r1 - r0) + ", lost " + lost.Count);
+        }
+        Check("(c) the log says retried", File.ReadAllText(log).Contains("result=retried"));
+        // (d) a write that always fails: the press is lost, its hand told, the log says why
+        sink = new FakeSink { FailNext = int.MaxValue }; log = TempLog(); lost.Clear();
+        using (var q = new TypingQueue(sink, () => new IntPtr(42), h => { lock (lost) lost.Add(h); }, log)) { q.Add(Ks('Z', 0)); q.Flush(2000); }
+        string lt = File.ReadAllText(log);
+        Check("(d) a lost press tells its hand", lost.Count == 1 && lost[0] == 0);
+        Check("(d) the log says lost and why", lt.Contains("result=lost") && lt.Contains("why=the stand-in refused") && lt.Contains("hand=L") && lt.Contains("key=Z"));
+        // (e) the log keeps the newest 2,000 lines once it passes 2,500
+        log = TempLog();
+        var old = new string[2600]; for (int i = 0; i < old.Length; ++i) old[i] = "old line " + i;
+        File.WriteAllLines(log, old);
+        sink = new FakeSink();
+        using (var q = new TypingQueue(sink, () => new IntPtr(42), h => { }, log)) { q.Add(Ks('N', 1)); q.Flush(2000); }
+        var lines = File.ReadAllLines(log);
+        Check("(e) the log is trimmed to the newest 2,000 lines", lines.Length == 2000 && lines[lines.Length - 1].Contains("key=N"), "lines " + lines.Length);
+        // (f) a new target is looked up in the background, before any key is typed to it
+        sink = new FakeSink(); IntPtr tgt = new IntPtr(42);
+        using (var q = new TypingQueue(sink, () => tgt, h => { }, TempLog())) {
+            Thread.Sleep(300);
+            tgt = new IntPtr(43);
+            Thread.Sleep(400);
+            bool seen; lock (sink.Refreshes) seen = sink.Refreshes.Contains(new IntPtr(43));
+            Check("(f) a changed target is looked up in the background", seen && sink.Writes.Count == 0);
+        }
     }
 }

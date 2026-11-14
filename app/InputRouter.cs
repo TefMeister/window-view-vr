@@ -150,8 +150,31 @@ class InputRouter : IDisposable {
             LastAction = "typed from the keyboard window";
         }
     }
-    void SendKey(uint vk, uint scanCode, bool extended, bool down, bool sys) {
-        IntPtr t = KeyTarget();
+    // 1.12: the typing thread (TypingQueue) names the window itself; a key, pressed and let go, by window messages
+    public void TypeKeyTo(IntPtr target, uint vk, bool withShift, bool withCtrl) {
+        lock (gate) {
+            bool s0 = shift, c0 = ctrl;
+            shift = s0 || withShift; ctrl = c0 || withCtrl;
+            uint scan = MapVirtualKey(vk, 0);
+            bool ext = vk >= 0x21 && vk <= 0x2E;
+            SendKeyTo(target, vk, scan, ext, true, false);
+            SendKeyTo(target, vk, scan, ext, false, false);
+            shift = s0; ctrl = c0;
+        }
+    }
+    // 1.12: a keyboard key as a console key record: its scan code, its character with this Shift / Ctrl, extended or not
+    public ConsoleKey Resolve(uint vk, bool withShift, bool withCtrl) {
+        uint scan = MapVirtualKey(vk, 0);
+        var state = new byte[256];
+        if (withShift) state[VK_SHIFT] = 0x80;
+        if (withCtrl) state[VK_CONTROL] = 0x80;
+        if ((GetKeyState((int)VK_CAPITAL) & 1) != 0) state[VK_CAPITAL] = 1;
+        var buf = new System.Text.StringBuilder(8);
+        int n = ToUnicode(vk, scan, state, buf, 8, 0);
+        return new ConsoleKey { Vk = vk, Scan = scan, Ch = n >= 1 ? buf[0] : (char)0, Ext = vk >= 0x21 && vk <= 0x2E, Shift = withShift, Ctrl = withCtrl };
+    }
+    void SendKey(uint vk, uint scanCode, bool extended, bool down, bool sys) { SendKeyTo(KeyTarget(), vk, scanCode, extended, down, sys); }
+    void SendKeyTo(IntPtr t, uint vk, uint scanCode, bool extended, bool down, bool sys) {
         if (t == IntPtr.Zero) return;
         uint lp = 1u | (scanCode << 16) | (extended ? 1u << 24 : 0) | (down ? 0u : 0xC0000000u);
         // A letter goes as ONE WM_CHAR (the window's own message loop would make a second one out of a WM_KEYDOWN, as
@@ -176,7 +199,7 @@ class InputRouter : IDisposable {
     }
     // keys go to the control last clicked, else to the window under the cursor, else to the top window (never to the
     // keyboard window itself, 1.7)
-    IntPtr KeyTarget() {
+    public IntPtr KeyTarget() {
         if (lastClicked != IntPtr.Zero && Native.IsWindow(lastClicked)) return lastClicked;
         lock (desk.Lock) {
             var hit = desk.HitTest(desk.CursorX, desk.CursorY);
