@@ -17,6 +17,7 @@ static partial class SelfTest {
     public static int Run(string what) {
         var groups = new Dictionary<string, Action> {
             {"keys-block", KeysBlock},
+            {"keymap", KeyMapChecks},
         };
         foreach (var g in groups) {
             if (what != "all" && what != g.Key) continue;
@@ -51,6 +52,28 @@ static partial class SelfTest {
             Check("left trigger read from its offset", k.LTrigger == 0.42f);
             k.WriteLeftCursor(true, new V3(1, 2, 3));
             Check("left cursor written", k.RawInt(KeysShared.HAND0 + KeysShared.H_CURSOR_VISIBLE) == 1 && k.RawFloat(KeysShared.HAND0 + KeysShared.H_CURSOR_P + 4) == 2f);
+        }
+    }
+
+    // ---- Task 2: the key table and the hit test ------------------------------------------------------------------------
+    static void KeyMapChecks() {
+        var t = new[] { new KeyRect { X = 8, Y = 8, W = 46, H = 40, Vk = 'Q' }, new KeyRect { X = 58, Y = 8, W = 46, H = 40, Vk = 'W' } };
+        KeyRect k;
+        Check("a point on Q finds Q", KeyMap.Find(t, 30, 8 + Capture.HEADER + 20, out k) && k.Vk == 'Q');
+        Check("a point on W finds W", KeyMap.Find(t, 80, 56, out k) && k.Vk == 'W');
+        Check("the gap between keys finds nothing", !KeyMap.Find(t, 56, 56, out k));
+        Check("the header strip finds nothing", !KeyMap.Find(t, 30, 20, out k));
+        using (var ui = new KeysUi(null)) {
+            var table = ui.KeyTable;
+            Check("the keyboard's table has all 61 keys", table.Length == 61, "got " + table.Length);
+            bool q = false; foreach (var r in table) if (r.Vk == 'Q' && r.W == 46 && r.H == 40) q = true;
+            Check("Q is in the table at key size", q);
+            bool s, c;
+            ui.ToggleShift(); ui.TakeMods(out s, out c);
+            bool s2, c2; ui.TakeMods(out s2, out c2);
+            Check("Shift is one-shot", s && !c && !s2 && !c2);
+            ui.ToggleCtrl(); ui.ToggleCtrl(); ui.TakeMods(out s, out c);
+            Check("Ctrl pressed twice is off again", !c);
         }
     }
 }

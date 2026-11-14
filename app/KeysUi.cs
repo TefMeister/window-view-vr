@@ -19,7 +19,11 @@ class KeysUi : Form {
     readonly List<KeyValuePair<Button, string[]>> letters = new List<KeyValuePair<Button, string[]>>();   // labels: plain, shifted
     Button shiftKey, ctrlKey;
     bool shift, ctrl;
+    readonly object modGate = new object();   // 1.12: Shift / Ctrl are toggled and taken from the pointer thread too
     public bool AllowClose;
+    // 1.12: every key's rectangle and code, for the pointer loop's own hit test (KeyMap.cs); built once, never edited
+    public KeyRect[] KeyTable { get; private set; }
+    public static readonly uint ShiftVk = VK_SHIFT, CtrlVk = VK_CONTROL;
 
     // one key: its label(s), its virtual-key code, and how many key widths it takes
     struct K { public string Plain, Shifted; public uint Vk; public float W; public K(string p, string s, uint vk, float w = 1f) { Plain = p; Shifted = s; Vk = vk; W = w; } }
@@ -51,6 +55,7 @@ class KeysUi : Form {
         Font = new Font("Segoe UI Semibold", 10f);
         StartPosition = FormStartPosition.Manual;
         int y = PAD, widest = 0;
+        var table = new List<KeyRect>();
         foreach (var row in KeyRows) {
             int x = PAD;
             foreach (var k in row) {
@@ -64,14 +69,15 @@ class KeysUi : Form {
                 b.ForeColor = Color.White;
                 b.TabStop = false;
                 b.SetBounds(x, y, w, KEY_H);
+                table.Add(new KeyRect { X = x, Y = y, W = w, H = KEY_H, Vk = k.Vk });
                 b.Text = k.Shifted != null && k.Plain.Length == 1 && !char.IsLetter(k.Plain[0]) ? k.Plain + "  " + k.Shifted : k.Plain;
                 if (k.Shifted != null && char.IsLetter(k.Plain[0])) letters.Add(new KeyValuePair<Button, string[]>(b, new[] { k.Plain, k.Shifted }));
                 var key = k;
                 // 1.8: a key types the moment it is pressed, not on release (Tefa 2026-10-30: "the keyboard does not register
                 // some presses"): a release that slid off the key no longer loses it
                 MouseEventHandler down;
-                if (k.Vk == VK_SHIFT) { shiftKey = b; down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { shift = !shift; ShowMods(); } }; }
-                else if (k.Vk == VK_CONTROL) { ctrlKey = b; down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { ctrl = !ctrl; ShowMods(); } }; }
+                if (k.Vk == VK_SHIFT) { shiftKey = b; down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ToggleShift(); }; }
+                else if (k.Vk == VK_CONTROL) { ctrlKey = b; down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ToggleCtrl(); }; }
                 else down = delegate(object o, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Press(key.Vk); };
                 b.MouseDown += down;
                 Controls.Add(b);
@@ -80,14 +86,30 @@ class KeysUi : Form {
             widest = Math.Max(widest, x - GAP + PAD);
             y += KEY_H + GAP;
         }
+        KeyTable = table.ToArray();
         ClientSize = new Size(widest, y - GAP + PAD);
         var screen = Screen.PrimaryScreen.WorkingArea;
         Location = new Point(screen.Right - Width - 20, screen.Bottom - Height - 20);
     }
 
     void Press(uint vk) {
-        input.TypeKey(vk, shift, ctrl);
-        if (shift || ctrl) { shift = ctrl = false; ShowMods(); }   // one-shot
+        bool s, c;
+        TakeMods(out s, out c);
+        input.TypeKey(vk, s, c);
+    }
+
+    // 1.12: Shift and Ctrl from any thread (the pointer loop presses them too); the window repaints only when they change
+    public void ToggleShift() { lock (modGate) shift = !shift; ShowModsSafe(); }
+    public void ToggleCtrl() { lock (modGate) ctrl = !ctrl; ShowModsSafe(); }
+    // the one-shot state for the key being typed now, cleared at once
+    public void TakeMods(out bool s, out bool c) {
+        bool changed;
+        lock (modGate) { s = shift; c = ctrl; changed = shift || ctrl; shift = ctrl = false; }
+        if (changed) ShowModsSafe();
+    }
+    void ShowModsSafe() {
+        if (IsHandleCreated && InvokeRequired) { try { BeginInvoke((Action)ShowMods); } catch (InvalidOperationException) { } }
+        else ShowMods();
     }
 
     void ShowMods() {
