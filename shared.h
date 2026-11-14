@@ -90,3 +90,43 @@ struct WindowViewShared {
 #pragma pack(pop)
 static_assert(sizeof(WindowViewSlot) == 40, "the app reads this layout by offset");
 static_assert(sizeof(WindowViewShared) == WINDOW_VIEW_HEADER_SIZE, "the app reads this layout by offset");
+
+// ---- 1.12 (2026-11-14): the pointer keyboard's own block ---------------------------------------------------------------
+// Tefa: "an actual keyboard i can use my motion controller pointers in to type - like the one VD uses", both hands. A
+// SEPARATE block, because the one above is also opened by name and size by Hand Poser, Grip Zones, Gun Poser, Animation &
+// Timing (Nudge.cs) and the Village mod (sleephands.cpp): it must never change. The app creates this block; the layer
+// opens it. Positions are in the desk's frame, like cursor_p above. App: app/KeysShared.cs (same offsets).
+#define WINDOW_VIEW_KEYS_MAPPING_NAME L"Local\\FlatToVR_WindowView_keys_v1"
+#define WINDOW_VIEW_KEYS_MAGIC 0x5359454Bu   // "KEYS"
+#define WINDOW_VIEW_KEYS_VERSION 1u
+#define WINDOW_VIEW_KEYS_SIZE 192
+#pragma pack(push, 4)
+struct WindowViewKeysHand {          // 76 bytes, hand 0 (left) at 28, hand 1 (right) at 104
+    volatile LONG lit_visible;       //  +0  app: 1 = a key is under this hand's pointer: draw its light
+    volatile LONG lit_slot;          //  +4  app: the keyboard's slot (its quad's turn)
+    float lit_c[3];                  //  +8  app: the key's centre
+    float lit_w;                     // +20  app: its width, metres
+    float lit_h;                     // +24  app: its height, metres
+    volatile LONG press_seq;         // +28  app: +1 per press of this hand: flash and buzz once
+    volatile LONG press_ok;          // +32  app: 1 = typed (green flash), 0 = lost (red)
+    volatile LONG press_slot;        // +36  app
+    float press_c[3];                // +40  app: the pressed key's centre
+    float press_w;                   // +52
+    float press_h;                   // +56
+    volatile LONG cursor_visible;    // +60  app: the left hand's arrow (hand 0 only; the right one is the main block's cursor)
+    float cursor_p[3];               // +64  app: its tip
+};
+struct WindowViewKeys {
+    uint32_t magic;                  //   0
+    uint32_t version;                //   4
+    float ltrigger;                  //   8  layer: the left trigger 0..1 (the main block has only the right one)
+    volatile LONG haptic_ok;         //  12  layer: pulses the runtime accepted
+    volatile LONG haptic_fail;       //  16  layer: pulses it refused
+    volatile LONG lit_drawn;         //  20  layer: frames with at least one key light drawn
+    volatile LONG flash_drawn;       //  24  layer: frames with at least one press flash drawn
+    WindowViewKeysHand hand[2];      //  28  0 = left, 1 = right
+    uint8_t pad[12];                 // 180
+};                                   // 192 bytes
+#pragma pack(pop)
+static_assert(sizeof(WindowViewKeysHand) == 76, "the app reads this layout by offset");
+static_assert(sizeof(WindowViewKeys) == WINDOW_VIEW_KEYS_SIZE, "the app reads this layout by offset");

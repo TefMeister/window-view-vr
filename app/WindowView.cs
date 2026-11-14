@@ -28,6 +28,8 @@ static class Program {
         // --test-input: the hooks also take mouse and key events made by software (SendInput), so test/input_test.py can
         // drive the desk; never used for real play, where software-made events are the app's own and are let through
         foreach (var a in args) if (a == "--test-input") InputRouter.AcceptInjected = true;
+        // 1.12: the keyboard's checks (SelfTest.cs); run before the one-instance lock, so they work beside a running app
+        if (args.Length > 0 && args[0] == "--selftest-keys") Environment.Exit(SelfTest.Run(args.Length > 1 ? args[1] : "all"));
         bool first;
         using (var one = new Mutex(true, "FlatToVR_WindowView_App", out first)) {
             if (!first) { MessageBox.Show("Window View is already open.", "Window View"); return; }
