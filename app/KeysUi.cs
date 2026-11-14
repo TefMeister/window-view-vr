@@ -92,10 +92,14 @@ class KeysUi : Form {
         Location = new Point(screen.Right - Width - 20, screen.Bottom - Height - 20);
     }
 
+    // 1.12: set by ViewUi; a key clicked with the mouse goes through the same typing thread as the controllers' presses
+    public TypingQueue Queue;
+
     void Press(uint vk) {
         bool s, c;
         TakeMods(out s, out c);
-        input.TypeKey(vk, s, c);
+        if (Queue != null) Queue.Add(new KeyStroke { Vk = vk, Shift = s, Ctrl = c, Hand = KeysShared.RIGHT, PressMs = Environment.TickCount });
+        else input.TypeKey(vk, s, c);
     }
 
     // 1.12: Shift and Ctrl from any thread (the pointer loop presses them too); the window repaints only when they change

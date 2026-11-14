@@ -47,6 +47,8 @@ class ViewUi : Form {
     static readonly ConcurrentDictionary<string, string> names = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     Thread captureThread;
     Pointer pointer;   // 1.5: the smooth pointer and the controllers (Pointer.cs)
+    KeysShared keysShared;   // 1.12: the keyboard's block for the layer (lights, flashes, buzz, the left trigger)
+    TypingQueue typing;      // 1.12: the keyboard's presses, typed on their own thread
     KeysUi keys;       // 1.7: Window View's own keyboard
     const string SELF_TITLE = "Window View", LANES_EXE = "WindowsTerminal.exe";
     volatile bool running = true;
@@ -173,6 +175,12 @@ class ViewUi : Form {
         input.OnChanged += delegate(bool on) { try { BeginInvoke(new Action(ShowInput)); } catch (Exception) { } };
         input.Start();
         keys = new KeysUi(input);
+        // 1.12: both hands type on the keyboard; presses go on their own thread, lit / flashed / buzzed by the layer
+        keysShared = new KeysShared();
+        typing = new TypingQueue(new RouterSink(input), input.KeyTarget, keysShared.MarkLost,
+            Path.Combine(Path.GetDirectoryName(SettingsFile), "keys.log"));
+        keys.Queue = typing;
+        pointer.Keyboard = new KeyboardHands(keysShared, typing, keys);
         Shown += delegate { keys.Show(); InputRouter.KeyboardWindow = keys.Handle; Relink(); };
         Layer.Mend();   // v1.1: a registration that no longer matches the files beside the exe is re-done here
         ShowLayer();
@@ -246,6 +254,8 @@ class ViewUi : Form {
         running = false;
         uiTimer.Stop();
         if (pointer != null) pointer.Dispose();
+        if (typing != null) typing.Dispose();
+        if (keysShared != null) keysShared.Dispose();
         if (keys != null) { keys.AllowClose = true; keys.Close(); InputRouter.KeyboardWindow = IntPtr.Zero; }
         shared.CtrlMode = false;  // the game gets its controllers back
         input.Dispose();          // the mouse and keyboard always come back

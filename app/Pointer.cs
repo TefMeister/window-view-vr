@@ -84,10 +84,12 @@ class Pointer : IDisposable {
     volatile bool running = true;
     bool trigger, a, y, leftDown;   // leftDown (1.10): the left button as sent, from the trigger or A
     bool held; Placement heldOn; float heldX, heldY;   // 1.8: the pointer held still for a click
+    bool rightOnKeys;   // 1.12: the right pointer is on the keyboard this frame (its press is typed, not clicked)
     float wheel;
     int lastSeq = -1, lastTick = Environment.TickCount;
     readonly Carry right = new Carry(), left = new Carry();   // either hand carries a window, both at once
     public string LastAction = "";
+    public KeyboardHands Keyboard;   // 1.12: both hands type on Window View's keyboard (set by ViewUi)
 
     public Pointer(Shared shared, Desk desk, InputRouter input) {
         this.shared = shared; this.desk = desk; this.input = input;
@@ -179,6 +181,14 @@ class Pointer : IDisposable {
             else if (left.Grip) { left.Grip = false; if (left.Window != null) desk.Save(); left.Window = null; }
             if (right.Window != null) { hover = right.Window; hu = right.U; hv = right.V; }
             else hover = Under(o, d, distance, room, null, out hu, out hv);
+            // 1.12: both hands on the keyboard (KeyboardHands.cs); a hand carrying a window types nothing
+            if (Keyboard != null) {
+                int now = Environment.TickCount;
+                rightOnKeys = Keyboard.Step(KeysShared.RIGHT, right.Window == null ? hover : null, hu, hv, distance, room, trig, (buttons & 1) != 0, now);
+                Placement lh = null; float lu = 0, lv = 0;
+                if (leftOk && left.Window == null) lh = Under(lo, ld, distance, room, null, out lu, out lv);
+                Keyboard.Step(KeysShared.LEFT, lh, lu, lv, distance, room, Keyboard.LTrigger, false, now);
+            }
         }
         if (hover != null) {
             float cx, cy, seen;
@@ -195,7 +205,7 @@ class Pointer : IDisposable {
         // A is the left button too (held = drag), beside the trigger; the right button is gone from the controllers
         bool tNow = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;
         bool aNow = (buttons & 1) != 0;
-        bool leftNow = tNow || aNow;
+        bool leftNow = (tNow || aNow) && !rightOnKeys;   // 1.12: on the keyboard the press is typed, never clicked as well
         trigger = tNow; a = aNow;
         if (leftNow != leftDown) { leftDown = leftNow; input.PointerLeft(leftNow); }
         if (Math.Abs(stick) > STICK_DEAD) {                              // the right stick: the mouse wheel
@@ -211,6 +221,8 @@ class Pointer : IDisposable {
     // CONTROL mode went off: nothing stays held
     void Release() {
         trigger = false; a = false;
+        rightOnKeys = false;
+        if (Keyboard != null) Keyboard.Release();
         if (leftDown) { leftDown = false; input.PointerLeft(false); }
         lock (desk.Lock) {
             if (right.Window != null || left.Window != null) desk.Save();

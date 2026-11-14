@@ -21,6 +21,7 @@ static partial class SelfTest {
             {"keymap", KeyMapChecks},
             {"handkeys", HandKeysChecks},
             {"typing", TypingChecks},
+            {"wiring", WiringChecks},
         };
         foreach (var g in groups) {
             if (what != "all" && what != g.Key) continue;
@@ -126,6 +127,7 @@ static partial class SelfTest {
     class FakeSink : IKeySink {
         public readonly List<string> Writes = new List<string>();
         public readonly List<IntPtr> Refreshes = new List<IntPtr>();
+        public readonly List<KeyStroke> Strokes = new List<KeyStroke>();
         public int FailNext;            // this many writes fail, then they work (int.MaxValue = always)
         public ManualResetEvent Gate = new ManualResetEvent(true);   // reset = the next write waits here
         public ManualResetEvent Entered = new ManualResetEvent(false);
@@ -133,7 +135,7 @@ static partial class SelfTest {
             Entered.Set();
             Gate.WaitOne(5000);
             var sb = new System.Text.StringBuilder();
-            foreach (var k in keys) sb.Append((char)k.Vk);
+            foreach (var k in keys) { sb.Append((char)k.Vk); lock (Strokes) Strokes.Add(k); }
             lock (Writes) Writes.Add(sb.ToString());
             if (FailNext > 0) { FailNext--; why = "the stand-in refused"; return false; }
             why = ""; return true;
@@ -190,4 +192,63 @@ static partial class SelfTest {
             Check("(f) a changed target is looked up in the background", seen && sink.Writes.Count == 0);
         }
     }
+
+    // ---- Task 5: both hands wired: the keyboard step the pointer loop calls for each hand -----------------------------
+    static void WiringChecks() {
+        using (var ui = new KeysUi(null))
+        using (var keys = new KeysShared(@"Local\FlatToVR_WindowView_keys_selftest_wiring")) {
+            var sink = new FakeSink();
+            using (var q = new TypingQueue(sink, () => new IntPtr(42), keys.MarkLost, TempLog())) {
+                ui.Queue = q;
+                var kb = new KeyboardHands(keys, q, ui);
+                var p = new Placement { Hwnd = new IntPtr(7), Title = KeysUi.TITLE, PicW = ui.ClientSize.Width, PicH = ui.ClientSize.Height + Capture.HEADER, Slot = 2, Scale = 0.001f };
+                float qu, qv, wu, wv, su, sv;
+                Uv(ui, p, 'Q', out qu, out qv); Uv(ui, p, 'W', out wu, out wv); Uv(ui, p, KeysUi.ShiftVk, out su, out sv);
+                int r = KeysShared.HAND0 + KeysShared.HAND_SIZE, l = KeysShared.HAND0;
+                int seq0 = keys.RawInt(r + KeysShared.H_PRESS_SEQ);
+                bool on = kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0f, false, 0);
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0.4f, false, 11);
+                q.Flush(2000);
+                Check("the right hand on the keyboard says so (no 1.11 click)", on);
+                Check("the right hand's pull types Q", Typed(sink) == "Q", Typed(sink));
+                Check("the right hand's press is flashed", keys.RawInt(r + KeysShared.H_PRESS_SEQ) == seq0 + 1 && keys.RawInt(r + KeysShared.H_PRESS_SLOT) == 2);
+                Check("the right hand's key is lit", keys.RawInt(r + KeysShared.H_LIT_VISIBLE) == 1 && keys.RawFloat(r + KeysShared.H_LIT_W) > 0.04f);
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0f, false, 22);
+                kb.Step(KeysShared.LEFT, p, wu, wv, 1f, false, 0f, false, 33);
+                kb.Step(KeysShared.LEFT, p, wu, wv, 1f, false, 0.4f, false, 44);
+                q.Flush(2000);
+                Check("the left hand's pull types W", Typed(sink) == "QW", Typed(sink));
+                Check("the left hand's arrow is shown on the keyboard", keys.RawInt(l + KeysShared.H_CURSOR_VISIBLE) == 1);
+                kb.Step(KeysShared.LEFT, p, wu, wv, 1f, false, 0f, false, 55);
+                kb.Step(KeysShared.RIGHT, p, su, sv, 1f, false, 0.4f, false, 66); kb.Step(KeysShared.RIGHT, p, su, sv, 1f, false, 0f, false, 77);
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0.4f, false, 88); kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0f, false, 99);
+                kb.Step(KeysShared.RIGHT, p, wu, wv, 1f, false, 0.4f, false, 111); kb.Step(KeysShared.RIGHT, p, wu, wv, 1f, false, 0f, false, 122);
+                q.Flush(2000);
+                KeyStroke[] st; lock (sink.Strokes) st = sink.Strokes.ToArray();
+                Check("Shift is not typed itself, it shifts the next key only", Typed(sink) == "QWQW" && st[2].Shift && !st[3].Shift, Typed(sink));
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0.5f, false, 133);
+                kb.Release();
+                Check("CONTROL off: both lights and the left arrow are off", keys.RawInt(r + KeysShared.H_LIT_VISIBLE) == 0 && keys.RawInt(l + KeysShared.H_LIT_VISIBLE) == 0 && keys.RawInt(l + KeysShared.H_CURSOR_VISIBLE) == 0);
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0.5f, false, 144);
+                q.Flush(2000);
+                Check("a trigger held through CONTROL off types nothing", Typed(sink) == "QWQWQ", Typed(sink));
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0f, false, 155);
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0f, true, 166);
+                q.Flush(2000);
+                Check("A types (also while another app claims the buttons, A stays a click)", Typed(sink) == "QWQWQQ", Typed(sink));
+                var notKb = new Placement { Hwnd = new IntPtr(8), Title = "Notepad", PicW = 400, PicH = 300, Slot = 1, Scale = 0.001f };
+                bool on2 = kb.Step(KeysShared.RIGHT, notKb, 0.5f, 0.5f, 1f, false, 0f, false, 177);
+                Check("another window is not the keyboard: no light, 1.11 click path", !on2 && keys.RawInt(r + KeysShared.H_LIT_VISIBLE) == 0);
+                p.Shown = false;
+                kb.Step(KeysShared.RIGHT, p, qu, qv, 1f, false, 0.9f, false, 188);
+                q.Flush(2000);
+                Check("a hidden keyboard types nothing", Typed(sink) == "QWQWQQ", Typed(sink));
+            }
+        }
+    }
+    static void Uv(KeysUi ui, Placement p, uint vk, out float u, out float v) {
+        u = v = 0;
+        foreach (var k in ui.KeyTable) if (k.Vk == vk) { u = (k.X + k.W / 2f) / p.PicW; v = (k.Y + Capture.HEADER + k.H / 2f) / p.PicH; return; }
+    }
+    static string Typed(FakeSink s) { lock (s.Writes) return string.Join("", s.Writes.ToArray()); }
 }
