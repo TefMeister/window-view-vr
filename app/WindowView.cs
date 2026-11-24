@@ -107,6 +107,7 @@ class Shared : IDisposable {
     }
     // another app (Hand Poser's nudge) is using X / Y / A / B and the grips right now
     public bool ButtonsClaimed { get { ulong c = view.ReadUInt64(BUTTON_CLAIM); return c != 0 && GetTickCount64() - c < 500; } }
+    public float LStickX { get { return view.ReadSingle(640); } }   // 1.14: the left stick's left / right (shared.h lstick_x)
     public bool ReadLeftRay(out V3 o, out V3 d, out float squeeze, out float stickY) {
         o = new V3(view.ReadSingle(LRAY_O), view.ReadSingle(LRAY_O + 4), view.ReadSingle(LRAY_O + 8));
         d = new V3(view.ReadSingle(LRAY_D), view.ReadSingle(LRAY_D + 4), view.ReadSingle(LRAY_D + 8));

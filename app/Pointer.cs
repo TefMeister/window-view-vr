@@ -77,6 +77,7 @@ class Pointer : IDisposable {
     // CLICK_SLOP_PX picture pixels from where it was held (a slider drag), or the trigger is let go.
     const float TRIGGER_TOUCH = 0.12f, CLICK_SLOP_PX = 14f;
     const float STICK_DEAD = 0.25f, WHEEL_NOTCHES_PER_S = 8f, DEPTH_PER_S = 1.6f;   // full stick: 8 wheel notches a second / depth x1.6 a second
+    const float SCALE_PER_S = 1.6f;   // 1.14: the left stick's left / right while carrying: size x1.6 a second at full stick
     readonly Shared shared;
     readonly Desk desk;
     readonly InputRouter input;
@@ -183,17 +184,25 @@ class Pointer : IDisposable {
         bool leftOnKeys = false;
         float ltrig = Keyboard != null ? Keyboard.LTrigger : 0f;
         lock (desk.Lock) {
-            CarryStep(right, o, d, sq, right.Window != null ? stick : 0, distance, room, dt, left.Window, "right");
-            if (leftOk) CarryStep(left, lo, ld, lsq, lstick, distance, room, dt, right.Window, "left");
+            CarryStep(right, o, d, sq, 0, distance, room, dt, left.Window, "right");
+            if (leftOk) CarryStep(left, lo, ld, lsq, 0, distance, room, dt, right.Window, "left");
             else if (left.Grip) { left.Grip = false; if (left.Window != null) desk.Save(); left.Window = null; }
+            // 1.14 (Tefa 2026-11-24: "when i'm holding a window in VR with either LG or GR only these must work - LS up/down to move
+            // it further/closer LS left/right to make it smaller/bigger"): while a grip holds a window, the LEFT stick works the
+            // held window(s) and nothing else answers: no clicks, no wheel, no recentre, no typing (and the helpers stand still,
+            // their Nudge.cs reads the grips too). RS (tilt / turn) needs the layer to turn a window: not yet.
+            if (right.Window != null || left.Window != null) {
+                CarryStick(lstick, shared.LStickX, dt, right.Window, left.Window != right.Window ? left.Window : null);
+                carrying = true;
+            } else carrying = false;
             if (right.Window != null) { hover = right.Window; hu = right.U; hv = right.V; }
             else hover = Under(o, d, distance, room, null, out hu, out hv);
             if (leftOk && left.Window == null) lh = Under(lo, ld, distance, room, null, out lu, out lv);
             // 1.12: both hands on the keyboard (KeyboardHands.cs); a hand carrying a window types nothing
             if (Keyboard != null) {
                 int now = Environment.TickCount;
-                rightOnKeys = Keyboard.Step(KeysShared.RIGHT, right.Window == null ? hover : null, hu, hv, distance, room, trig, (buttons & 1) != 0, now);
-                leftOnKeys = Keyboard.Step(KeysShared.LEFT, lh, lu, lv, distance, room, ltrig, false, now);
+                rightOnKeys = Keyboard.Step(KeysShared.RIGHT, right.Window == null && !carrying ? hover : null, hu, hv, distance, room, trig, (buttons & 1) != 0, now);
+                leftOnKeys = Keyboard.Step(KeysShared.LEFT, carrying ? null : lh, lu, lv, distance, room, ltrig, false, now);
             }
             // 1.13: the dots. The right one is the desk cursor (DrawCursor); here only whether the right ray meets a window. The left
             // one is drawn wherever the left ray meets a window (on the keyboard KeyboardHands writes it)
@@ -208,6 +217,7 @@ class Pointer : IDisposable {
         // 1.13 (Tefa 2026-11-14: "add left and right mouse to all", then "trigger left, A/X right"): each hand clicks where its own
         // dot is: its trigger is the left button (held = drag), A (right hand) / X (left hand) the right button. There is one
         // Windows mouse, so the hand that presses first owns it until both its buttons are up; the other hand's presses wait.
+        if (carrying) { LetGo(); return; }   // 1.14: a held window: nothing else answers
         bool rFree = right.Window == null && !rightOnKeys, lFree = left.Window == null && !leftOnKeys && lh != null;
         bool rTrig = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;
         bool lTrig = ltrigger ? ltrig > TRIGGER_UP : ltrig > TRIGGER_DOWN;
@@ -262,6 +272,31 @@ class Pointer : IDisposable {
         float size = CLICK_FLASH * Math.Max(0.3f, tip.Length);
         Keyboard.Keys.WritePress(hand, p.Slot, tip, size, size);
         LastAction = (hand == KeysShared.LEFT ? "left" : "right") + " hand clicked " + p.Title;
+    }
+
+    bool carrying;   // 1.14: a grip holds a window this loop
+    // the left stick on the held window(s): up / down = farther / closer, right / left = bigger / smaller
+    void CarryStick(float sy, float sx, float dt, Placement a, Placement b) {
+        foreach (var w in new[] { a, b }) {
+            if (w == null || !w.Live) continue;
+            if (Math.Abs(sy) > STICK_DEAD) {
+                float amount = (Math.Abs(sy) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(sy);
+                w.Depth = Math.Max(Desk.MIN_DEPTH, Math.Min(Desk.MAX_DEPTH, w.Depth * (float)Math.Pow(DEPTH_PER_S, amount * dt)));
+            }
+            if (Math.Abs(sx) > STICK_DEAD) {
+                float amount = (Math.Abs(sx) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(sx);
+                w.Scale = Math.Max(Desk.MIN_SCALE, Math.Min(Desk.MAX_SCALE, w.Scale * (float)Math.Pow(SCALE_PER_S, amount * dt)));
+            }
+        }
+    }
+    // the mouse buttons let go (a window was taken while one was down), the keyboard hands too
+    void LetGo() {
+        if (leftDown) { leftDown = false; input.PointerLeft(false); }
+        if (middleDown) { middleDown = false; input.PointerMiddle(false); }
+        if (rightDown) { rightDown = false; input.PointerRight(false); }
+        owner = -1;
+        trigger = ltrigger = false;
+        wheel = 0;
     }
 
     // CONTROL mode went off: nothing stays held
