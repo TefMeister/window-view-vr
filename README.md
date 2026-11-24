@@ -83,6 +83,12 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    the game's hands still and its buttons unpressed by itself; a hand that Hand Freeze has frozen is now left to Hand Freeze, so
    a hand it puts on a picked spot (its SPOTS tab) or carries really gets there, and the grip and trigger it presses for the
    game arrive. Checked without a game (Hand Freeze's `test/pose_test.py`: the old layer fails it, this one passes); not worn yet.
+15. New in 1.17 (2026-11-25): **a window can no longer fly away.** A window that was turned far to one side could shoot off
+   while it was carried, out of sight and out of reach for good (one was found 15 km to the left and 21 km up). Now a carried
+   window moves a hand's width a loop at most, stands still while the pointer only grazes its face, never goes higher or
+   lower than 1.5 m on the desk, and never farther than 4 times the desk's distance. A window whose saved place is past
+   those limits comes back straight ahead, facing you, the next time Window View starts. Checked without a game
+   (`WindowView.exe --selftest-keys turns`: the old carry fails the new checks, this one passes); not worn yet.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.
