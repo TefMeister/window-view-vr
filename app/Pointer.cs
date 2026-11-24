@@ -84,6 +84,7 @@ class Pointer : IDisposable {
     volatile bool running = true;
     bool trigger, a, y, leftDown;   // leftDown (1.10): the left button as sent, from the trigger or A
     bool ltrigger, rightDown;       // 1.13: the left trigger's state, the right button as sent
+    bool middleDown;                // 1.14: the middle button as sent (the left trigger while a helper holds the buttons)
     int owner = -1;                 // 1.13: the hand whose press holds the one Windows mouse (-1 = none)
     const float CLICK_FLASH = 0.016f;   // 1.13: the click flash's side, metres per metre of distance
     bool held; Placement heldOn; float heldX, heldY;   // 1.8: the pointer held still for a click
@@ -176,7 +177,7 @@ class Pointer : IDisposable {
         // 1.10 (Tefa 2026-11-09): the helpers now use Y / B (undo, redo), X (clear the ticks) and the right stick (the steps), and
         // A is everyone's left click: while one claims them, only A and the trigger click here, the stick does not scroll, the
         // grips still carry
-        if (claimed) { buttons &= 1 | 8; stick = 0; }   // 1.13: A and X (the clicks) stay ours; the helpers use Y only now
+        if (claimed) { buttons &= 1 | 8; stick = 0; }   // 1.13: A stays for the keyboard; 1.14: A / X no right click below, LT the middle button
         Placement hover; float hu = 0, hv = 0;
         Placement lh = null; float lu = 0, lv = 0;
         bool leftOnKeys = false;
@@ -211,8 +212,12 @@ class Pointer : IDisposable {
         bool rTrig = trigger ? trig > TRIGGER_UP : trig > TRIGGER_DOWN;
         bool lTrig = ltrigger ? ltrig > TRIGGER_UP : ltrig > TRIGGER_DOWN;
         trigger = rTrig; ltrigger = lTrig;
-        bool rL = rFree && rTrig, rR = rFree && (buttons & 1) != 0;
-        bool lL = lFree && lTrig, lR = lFree && (buttons & 8) != 0;
+        // 1.14 (Tefa 2026-11-24, for the helper windows: "RT is left mouse click, we don't need right mouse click", "LT needs to
+        // now select the whole section of sliders ... and work so along all apps"): while a helper holds the buttons, A and X
+        // send no right click (the helper uses them), and the left trigger sends the MIDDLE button at the left dot: the helper
+        // picks the section under it
+        bool rL = rFree && rTrig, rR = rFree && !claimed && (buttons & 1) != 0;
+        bool lL = lFree && lTrig, lR = lFree && !claimed && (buttons & 8) != 0;
         if (owner < 0) owner = rL || rR ? KeysShared.RIGHT : lL || lR ? KeysShared.LEFT : -1;
         // where the mouse is: the owning hand's dot, held still from the first touch of its trigger or button (1.8's slop),
         // else the right hand's (hover effects follow the right pointer)
@@ -228,11 +233,14 @@ class Pointer : IDisposable {
                 input.PointerTo(heldX, heldY);
             else { if (held) heldOn = null; input.PointerTo(cx, cy); }   // moved past the slop: follow (a drag), until let go
         }
-        bool wantL = owner == KeysShared.RIGHT ? rL : owner == KeysShared.LEFT ? lL : false;
+        bool leftMid = claimed && owner == KeysShared.LEFT;
+        bool wantL = owner == KeysShared.RIGHT ? rL : owner == KeysShared.LEFT && !leftMid ? lL : false;
+        bool wantM = leftMid && lL;
         bool wantR = owner == KeysShared.RIGHT ? rR : owner == KeysShared.LEFT ? lR : false;
         if (wantL != leftDown) { leftDown = wantL; input.PointerLeft(wantL); if (wantL) ClickFlash(owner, at, au, av, distance, room); }
+        if (wantM != middleDown) { middleDown = wantM; input.PointerMiddle(wantM); if (wantM) ClickFlash(owner, at, au, av, distance, room); }
         if (wantR != rightDown) { rightDown = wantR; input.PointerRight(wantR); if (wantR) ClickFlash(owner, at, au, av, distance, room); }
-        if (!leftDown && !rightDown) owner = -1;
+        if (!leftDown && !rightDown && !middleDown) owner = -1;
         a = (buttons & 1) != 0;
         if (right.Window != null) return;   // while the right hand carries, its stick neither scrolls nor recentres
         if (Math.Abs(stick) > STICK_DEAD) {                              // the right stick: the mouse wheel
@@ -264,6 +272,7 @@ class Pointer : IDisposable {
         owner = -1;
         if (Keyboard != null) Keyboard.Release();
         if (leftDown) { leftDown = false; input.PointerLeft(false); }
+        if (middleDown) { middleDown = false; input.PointerMiddle(false); }
         lock (desk.Lock) {
             if (right.Window != null || left.Window != null) desk.Save();
             right.Window = left.Window = null;

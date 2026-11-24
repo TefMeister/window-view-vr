@@ -68,6 +68,10 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    right hand, blue for the left**, drawn every headset frame. **Each hand clicks at its own dot: the trigger is the left mouse
    button (held = drag), A (right hand) / X (left hand) the right button.** One Windows mouse: the hand that presses first holds
    it until it lets go. Every click gets the keyboard's feedback: a short flash round the dot and a buzz in that hand.
+12. New in 1.14 (Tefa 2026-11-24, for the helper windows: *"RT is left mouse click, we don't need right mouse click"*, *"LT
+   needs to now select the whole section of sliders"*): **while a helper window (Hand Poser, Grip Zones ...) holds the
+   buttons, A and X send no right click** (the helper uses them: A ticks, X undoes) **and the left trigger sends the middle
+   button at the blue dot**, which a helper takes as "pick this section". Everywhere else the buttons are as in 1.13.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.

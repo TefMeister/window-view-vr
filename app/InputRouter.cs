@@ -255,6 +255,7 @@ class InputRouter : IDisposable {
     public void PointerTo(float cx, float cy) { lock (gate) MoveCore(() => { desk.CursorX = cx; desk.CursorY = cy; }); }
     public void PointerLeft(bool down) { lock (gate) Button(down ? WM_LBUTTONDOWN : WM_LBUTTONUP); }
     public void PointerRight(bool down) { lock (gate) Button(down ? WM_RBUTTONDOWN : WM_RBUTTONUP); }
+    public void PointerMiddle(bool down) { lock (gate) Button(down ? WM_MBUTTONDOWN : WM_MBUTTONUP); }   // 1.14: LT in a helper
     public void PointerWheel(int delta) { lock (gate) Wheel(WM_MOUSEWHEEL, (short)delta); }
     void Move(int dx, int dy) { lock (gate) MoveCore(() => desk.MoveCursor(dx, dy)); }
     void MoveCore(Action place) {
