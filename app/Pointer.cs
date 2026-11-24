@@ -161,6 +161,24 @@ class Pointer : IDisposable {
         return best;
     }
 
+    // one loop of a carry: the window slides on the desk so the held spot comes back under the ray.
+    // 1.17 (Tefa 2026-11-25: Hand Freeze's window "flew away" while being placed; its layout read 15 km left, 21 km up, turned
+    // 63 degrees): a ray that only grazes a turned window's face meets its plane far off, more so each loop. Now a grazing
+    // ray moves nothing, one loop moves a window MAX_CARRY_STEP at most, and Desk.KeepNear holds it within reach
+    public const float MIN_FACING = 0.2f, MAX_CARRY_STEP = 0.1f;   // ray against the face (about 11 degrees) / metres a loop
+    public static void CarryMove(Placement w, Carry c, V3 o, V3 d, float distance, bool room) {
+        var f = WindowFrame.Of(w, distance, room);
+        float nu, nv, t;
+        if (Math.Abs(V3.Dot(d, f.Normal)) >= MIN_FACING && f.Meet(o, d, out nu, out nv, out t)) {
+            float dx = (nu - c.U) * w.PicW * w.Seen, dy = (nv - c.V) * w.PicH * w.Seen;
+            if (!float.IsNaN(dx) && !float.IsNaN(dy)) {
+                w.X += Math.Max(-MAX_CARRY_STEP, Math.Min(MAX_CARRY_STEP, dx));
+                w.Y -= Math.Max(-MAX_CARRY_STEP, Math.Min(MAX_CARRY_STEP, dy));
+            }
+        }
+        Desk.KeepNear(w, distance);
+    }
+
     // a hand's grip: pressed over a window, the hand takes it at that spot; held, the window follows so the spot stays under the
     // ray (the window moves on the desk by how far the spot drifted from the ray, every loop); the stick pushes it away (up) or
     // pulls it in (down); let go, it stays where it is and the layout is saved. Called under desk.Lock.
@@ -178,12 +196,7 @@ class Pointer : IDisposable {
         c.Grip = g;
         var w = c.Window;
         if (w == null || !w.Live) return;
-        var f = WindowFrame.Of(w, distance, room);
-        float nu, nv, t;
-        if (f.Meet(o, d, out nu, out nv, out t)) {
-            w.X += (nu - c.U) * w.PicW * w.Seen;
-            w.Y -= (nv - c.V) * w.PicH * w.Seen;
-        }
+        CarryMove(w, c, o, d, distance, room);
         if (Math.Abs(stick) > STICK_DEAD) {
             float amount = (Math.Abs(stick) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(stick);
             w.Depth = Math.Max(Desk.MIN_DEPTH, Math.Min(Desk.MAX_DEPTH, w.Depth * (float)Math.Pow(DEPTH_PER_S, amount * dt)));

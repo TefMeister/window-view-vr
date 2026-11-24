@@ -133,6 +133,17 @@ class Desk {
         hit.P.Depth = Math.Max(MIN_DEPTH, Math.Min(MAX_DEPTH, hit.P.Depth * (float)Math.Pow(DEPTH_STEP, steps)));
         return hit.P;
     }
+    // 1.17: no window farther than this from the eyes. X runs along the desk's curve, a full circle round the eyes, so it is wrapped to
+    // half a turn either way (the same place, a smaller number); Y is held to MAX_Y up or down (about 56 degrees at the
+    // desk's 1 m), and Depth already stops at MAX_DEPTH. Rubbish (NaN) goes back to the middle. Load() brings a window that
+    // is past these limits back straight ahead
+    public const float MAX_Y = 1.5f, LOST_X = 100f;   // LOST_X: a layout line this far round (16 turns) was never put there by hand
+    public static void KeepNear(Placement p, float distance) {
+        if (!(distance > 0.01f)) distance = 1f;
+        float turn = 2 * (float)Math.PI * distance;   // once round the eyes: the same place again
+        p.X = float.IsNaN(p.X) || Math.Abs(p.X) > LOST_X ? 0 : p.X - turn * (float)Math.Round(p.X / turn);
+        p.Y = float.IsNaN(p.Y) ? 0 : Math.Max(-MAX_Y, Math.Min(MAX_Y, p.Y));
+    }
     public static float ClampTurn(float deg) { return float.IsNaN(deg) ? 0 : Math.Max(-MAX_TURN, Math.Min(MAX_TURN, deg)); }
     public void Raise(Placement p) { if (Windows.Remove(p)) Windows.Add(p); }
     public int FreeSlot() {
@@ -172,6 +183,8 @@ class Desk {
             if (f.Length > 8) float.TryParse(f[8], NumberStyles.Float, ci, out p.Depth);   // 1.4
             if (f.Length > 10) { float.TryParse(f[9], NumberStyles.Float, ci, out p.Tilt); float.TryParse(f[10], NumberStyles.Float, ci, out p.Turn); }   // 1.15
             p.Tilt = ClampTurn(p.Tilt); p.Turn = ClampTurn(p.Turn);
+            bool lost = float.IsNaN(p.X) || float.IsNaN(p.Y) || Math.Abs(p.X) > LOST_X || Math.Abs(p.Y) > MAX_Y + 0.01f;
+            if (lost) { p.X = 0; p.Y = 0; p.Tilt = 0; p.Turn = 0; }   // 1.17: a window that got away comes back straight ahead, facing the eyes
             p.Depth = Math.Max(MIN_DEPTH, Math.Min(MAX_DEPTH, p.Depth == 0 ? 1f : p.Depth));
             p.Scale = Math.Max(MIN_SCALE, Math.Min(MAX_SCALE, p.Scale == 0 ? DEFAULT_SCALE : p.Scale));
             p.Opacity = Math.Max(0.1f, Math.Min(1f, p.Opacity == 0 ? 1f : p.Opacity));

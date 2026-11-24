@@ -70,6 +70,31 @@ static partial class SelfTest {
         var w2 = TestWindow(0, 0, 1, 0, 0);
         Pointer.TiltTurn(0, -1f, 0.25f, w, w2);
         Check("both held windows turn together", Math.Abs(w2.Turn + 15) < 1e-3, "turn " + w2.Turn);
+        // 1.17: a carried window never gets away. Hand Freeze's window as it was on 2026-11-25 (turned 63, tilted 18), held at
+        // its middle while the hand's ray sweeps off its face and back, as a hand does when placing it
+        foreach (bool room in new[] { false, true }) {
+            var lostW = TestWindow(-0.81f, 0.47f, 0.78f, 18.4f, 63.4f);
+            var hold = new Carry { Window = lostW, U = 0.5f, V = 0.5f };
+            var eye = new V3(0.2f, -0.3f, -0.1f);
+            var to = WindowFrame.Of(lostW, 1f, room).Centre - eye;
+            double yaw0 = Math.Atan2(to.X, -to.Z), pitch0 = Math.Asin(to.Y / to.Length);
+            bool near = true, calm = true; string where = "";
+            for (int i = 0; i < 4000; ++i) {
+                double a = yaw0 + Math.Sin(i * 0.004) * 2.6, e = pitch0 + Math.Sin(i * 0.0027) * 1.2;
+                var ray = new V3((float)(Math.Sin(a) * Math.Cos(e)), (float)Math.Sin(e), (float)(-Math.Cos(a) * Math.Cos(e)));
+                float x0 = lostW.X, y0 = lostW.Y;
+                Pointer.CarryMove(lostW, hold, eye, ray, 1f, room);
+                if (float.IsNaN(lostW.X) || float.IsNaN(lostW.Y) || Math.Abs(lostW.X) > Math.PI + 1e-4 || Math.Abs(lostW.Y) > Desk.MAX_Y + 1e-4) { near = false; where = "loop " + i + ": " + lostW.X + ", " + lostW.Y; break; }
+                float stepX = Math.Abs(lostW.X - x0); if (stepX > Math.PI) stepX = Math.Abs(stepX - 2 * (float)Math.PI);   // once round is no jump
+                if (stepX > Pointer.MAX_CARRY_STEP + 1e-4 || Math.Abs(lostW.Y - y0) > Pointer.MAX_CARRY_STEP + 1e-4) { calm = false; where = "loop " + i; }
+            }
+            Check("a carried, turned window stays within reach" + (room ? " (room)" : " (follow)"), near, where);
+            Check("and never jumps more than a hand's width a loop" + (room ? " (room)" : " (follow)"), calm, where);
+        }
+        var flatW = TestWindow(0, 0, 1, 0, 0);
+        var flatHold = new Carry { Window = flatW, U = 0.5f, V = 0.5f };
+        for (int i = 0; i < 50; ++i) Pointer.CarryMove(flatW, flatHold, new V3(0, 0, 0), new V3((float)Math.Sin(0.3), 0, (float)-Math.Cos(0.3)), 1f, false);
+        Check("an ordinary carry still follows the ray", Math.Abs(flatW.X - 0.3f) < 0.01f && Math.Abs(flatW.Y) < 0.01f, flatW.X + ", " + flatW.Y);
         // the layout keeps them (a temp file, never the real one)
         string real = Desk.File, tmp = Path.Combine(Path.GetTempPath(), "wv_selftest_layout_" + Environment.TickCount + ".txt");
         try {
@@ -86,6 +111,10 @@ static partial class SelfTest {
             File.WriteAllText(tmp, "bad.exe|Bad|0|0|0.0006|1|1||1|400|NaN\r\n");
             var bad = new Desk(); bad.Load();
             Check("a wild tilt is held to 75, rubbish to 0", bad.Windows.Count == 1 && bad.Windows[0].Tilt == Desk.MAX_TURN && bad.Windows[0].Turn == 0);
+            File.WriteAllText(tmp, "gone.exe|Gone|-15534.58|21713.76|0.0006|0.63|1||0.778|18.4|63.4\r\nfine.exe|Fine|-5.93|1.3|0.0006|1|1||2|7|-5\r\n");
+            var gone = new Desk(); gone.Load();
+            Check("a window that flew away loads straight ahead, facing the eyes", gone.Windows.Count == 2 && gone.Windows[0].X == 0 && gone.Windows[0].Y == 0 && gone.Windows[0].Tilt == 0 && gone.Windows[0].Turn == 0);
+            Check("a window within reach loads where it was", gone.Windows[1].X == -5.93f && gone.Windows[1].Y == 1.3f && gone.Windows[1].Tilt == 7f);
         } finally { Desk.File = real; try { File.Delete(tmp); } catch (Exception) { } }
     }
 
