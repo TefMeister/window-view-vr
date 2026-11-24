@@ -79,6 +79,10 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    up / down lean its top back / forward, right / left turn its face right / left (up to 75 degrees either way; only the
    stronger direction of the push moves, so a tilt does not also turn it). The pointer aims at the turned window exactly
    where it is drawn, and the tilt and turn are kept in the layout with everything else. Not worn yet.
+14. New in 1.16 (2026-11-25): **Hand Freeze has the last word on a hand it holds.** With the pointers out, Window View keeps
+   the game's hands still and its buttons unpressed by itself; a hand that Hand Freeze has frozen is now left to Hand Freeze, so
+   a hand it puts on a picked spot (its SPOTS tab) or carries really gets there, and the grip and trigger it presses for the
+   game arrive. Checked without a game (Hand Freeze's `test/pose_test.py`: the old layer fails it, this one passes); not worn yet.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.

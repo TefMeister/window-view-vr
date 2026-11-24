@@ -62,7 +62,7 @@ enum { A_LCLICK, A_RCLICK, A_TRIGGER, A_SQUEEZE, A_STICK, A_AIM, A_A, A_B, A_Y, 
 XrAction g_act[A_COUNT]{};
 
 // the game's controller spaces and inputs, held while CONTROL mode is on (both hands, everything the game asks for)
-struct HeldSpace { XrSession session; bool kept = false; LONG gen = 0; XrPosef in_room{}; };
+struct HeldSpace { XrSession session; bool kept = false; LONG gen = 0; XrPosef in_room{}; int hand = 0; };   // 1.16: hand 1 left, 2 right, 0 not known
 struct HeldInput { bool kept = false; LONG gen = 0; XrActionStateBoolean b{}; XrActionStateFloat f{}; XrActionStateVector2f v{}; };
 std::map<XrSpace, HeldSpace> g_game_spaces;
 std::map<std::pair<XrAction, XrPath>, HeldInput> g_game_inputs;
@@ -70,6 +70,48 @@ volatile LONG g_ctrl_gen = 0;   // +1 each time CONTROL mode comes on: fresh pos
 bool g_ctrl_was = false;
 
 bool ctrl_on() { auto* sh = shared(); return sh != nullptr && sh->ctrl_mode != 0; }
+
+// 1.16 (2026-11-25): HAND FREEZE HAS THE LAST WORD ON A HAND IT HOLDS. Hand Freeze (hand-freeze-vr, its own layer in this game) can
+// now put a frozen hand somewhere (a picked hand spot, a carried gun) and press its grip and trigger for the game. While CONTROL
+// mode is on this layer answers the game's controllers itself (the hands stay where they were, nothing reads as pressed), and
+// whichever of the two layers sits nearer the game won: with this one nearer, Hand Freeze's pose never arrived (seen in Hand
+// Freeze's test/pose_test.py). So: a hand Hand Freeze holds frozen is left to it (its pose passes through), and a hand whose
+// buttons Hand Freeze answers (its `synth` bits, while its window ticks) keeps those answers. Read from Hand Freeze's two shared
+// blocks (its shared.h: `frozen` at 8 of Local\FlatToVR_HandFreeze_v4; `synth` at 12 and the app's tick at 248 of
+// Local\FlatToVR_HandFreeze_Pose_v1); neither is made here, and with Hand Freeze absent nothing changes.
+const BYTE* hf_block(const wchar_t* name, SIZE_T size, const BYTE*& slot, ULONGLONG& retry) {
+    if (slot != nullptr) return slot;
+    const ULONGLONG now = GetTickCount64();
+    if (now < retry) return nullptr;
+    retry = now + 1000;
+    HANDLE h = OpenFileMappingW(FILE_MAP_READ, FALSE, name);
+    if (h == nullptr) return nullptr;
+    slot = static_cast<const BYTE*>(MapViewOfFile(h, FILE_MAP_READ, 0, 0, size));
+    if (slot == nullptr) CloseHandle(h);   // else the handle stays open for the life of the process, on purpose
+    return slot;
+}
+LONG hand_freeze_frozen() {   // bits: 1 left, 2 right
+    static const BYTE* block = nullptr; static ULONGLONG retry = 0;
+    const BYTE* b = hf_block(L"Local\\FlatToVR_HandFreeze_v4", 208, block, retry);
+    if (b == nullptr) return 0;
+    LONG v; std::memcpy(&v, b + 8, sizeof v); return v & 3;
+}
+LONG hand_freeze_synth() {    // bits: 1 left, 2 right; only while Hand Freeze's window ticks
+    static const BYTE* block = nullptr; static ULONGLONG retry = 0;
+    const BYTE* b = hf_block(L"Local\\FlatToVR_HandFreeze_Pose_v1", 264, block, retry);
+    if (b == nullptr) return 0;
+    ULONGLONG beat; std::memcpy(&beat, b + 248, sizeof beat);
+    if (beat == 0 || GetTickCount64() - beat > 1500) return 0;
+    LONG v; std::memcpy(&v, b + 12, sizeof v); return v & 3;
+}
+int hand_of_subaction(XrPath path) {   // 1 left, 2 right, 0 not known
+    if (path == XR_NULL_PATH || g_next_path_to_string == nullptr) return 0;
+    char text[XR_MAX_PATH_LENGTH]{}; uint32_t n = 0;
+    if (XR_FAILED(g_next_path_to_string(g_instance, path, XR_MAX_PATH_LENGTH, &n, text))) return 0;
+    return std::strncmp(text, "/user/hand/left", 15) == 0 ? 1 : std::strncmp(text, "/user/hand/right", 16) == 0 ? 2 : 0;
+}
+// is this hand (0 = not known: only when both are) covered by Hand Freeze's bits?
+bool hand_freeze_has(int hand, LONG bits) { return hand == 1 ? (bits & 1) != 0 : hand == 2 ? (bits & 2) != 0 : bits == 3; }
 
 XrPath to_path(const char* s) {
     XrPath p = XR_NULL_PATH;
@@ -197,7 +239,12 @@ XRAPI_ATTR XrResult XRAPI_CALL wv_xrSyncActions(XrSession session, const XrActio
 // ---- the hooks: the game's controllers held while CONTROL mode is on -----------------------------------------------------
 XRAPI_ATTR XrResult XRAPI_CALL wv_xrCreateActionSpace(XrSession session, const XrActionSpaceCreateInfo* info, XrSpace* space) {
     const XrResult r = g_next_create_action_space(session, info, space);
-    if (XR_SUCCEEDED(r) && space != nullptr) { std::lock_guard _{g_mtx}; g_game_spaces[*space] = HeldSpace{session}; }
+    if (XR_SUCCEEDED(r) && space != nullptr) {
+        const int hand = info != nullptr ? hand_of_subaction(info->subactionPath) : 0;   // 1.16
+        std::lock_guard _{g_mtx};
+        HeldSpace h{session}; h.hand = hand;
+        g_game_spaces[*space] = h;
+    }
     return r;
 }
 XRAPI_ATTR XrResult XRAPI_CALL wv_xrDestroySpace(XrSpace space) {
@@ -213,6 +260,7 @@ void neutral(XrActionStateFloat&) {}
 template <class T>
 void held_input(const XrActionStateGetInfo* info, T& live, T HeldInput::*slot) {
     if (info == nullptr || !ctrl_on()) return;
+    if (const LONG synth = hand_freeze_synth(); synth != 0 && hand_freeze_has(hand_of_subaction(info->subactionPath), synth)) return;   // 1.16: Hand Freeze answers this hand's buttons
     std::lock_guard _{g_mtx};
     auto& in = g_game_inputs[{info->action, info->subactionPath}];
     const LONG gen = g_ctrl_gen;
@@ -259,6 +307,7 @@ bool held_pose(XrSpace space, XrSpace base, XrTime time, XrPosef& out) {
     std::lock_guard _{g_mtx};
     auto c = g_game_spaces.find(space);
     if (c == g_game_spaces.end() || g_game_spaces.count(base) != 0) return false;
+    if (const LONG frozen = hand_freeze_frozen(); frozen != 0 && hand_freeze_has(c->second.hand, frozen)) return false;   // 1.16: Hand Freeze holds this hand: its pose stands
     auto si = g_sessions.find(c->second.session);
     if (si == g_sessions.end() || !ensure_space(c->second.session, XR_REFERENCE_SPACE_TYPE_LOCAL, si->second.local_space)) return false;
     const XrSpace room = si->second.local_space;
