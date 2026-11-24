@@ -1,6 +1,6 @@
 // SelfTest.cs -- 1.12: checks of the keyboard's parts with no game, no headset and no window, for the build plan's
 // tests: `WindowView.exe --selftest-keys [group]` prints one PASS / FAIL line per check and exits 0 only when all passed.
-// Groups: keys-block, keymap, handkeys, typing, wiring (none = all). Nothing here touches the live shared blocks, real
+// Groups: keys-block, keymap, handkeys, typing, wiring, turns (none = all). Nothing here touches the live shared blocks, real
 // windows or real files: the keys block is opened under a test name, the log goes to a temp file.
 using System;
 using System.Collections.Generic;
@@ -22,6 +22,7 @@ static partial class SelfTest {
             {"handkeys", HandKeysChecks},
             {"typing", TypingChecks},
             {"wiring", WiringChecks},
+            {"turns", TurnsChecks},   // 1.15: SelfTestTurns.cs
         };
         foreach (var g in groups) {
             if (what != "all" && what != g.Key) continue;

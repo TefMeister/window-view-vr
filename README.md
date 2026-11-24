@@ -74,8 +74,11 @@ v3.2; an old registration without the 32-bit copy stops 32-bit OpenXR games from
    button at the blue dot**, which a helper takes as "pick this section". Everywhere else the buttons are as in 1.13.
    **While a grip (LG or RG) holds a window, only the left stick works, on the held window: up / down push it farther /
    bring it closer, right / left make it bigger / smaller.** No clicks, no wheel, no recentre, no typing, and the helpers
-   stand still (Tefa: *"LG and GR to grab and move windows must suppress all other button functions"*). Tilting and turning
-   a held window with the right stick is not built yet (it needs the headset part to turn a window).
+   stand still (Tefa: *"LG and GR to grab and move windows must suppress all other button functions"*).
+13. New in 1.15 (Tefa 2026-11-24): **while a grip holds a window, the right stick tilts and turns it** about its own middle:
+   up / down lean its top back / forward, right / left turn its face right / left (up to 75 degrees either way; only the
+   stronger direction of the push moves, so a tilt does not also turn it). The pointer aims at the turned window exactly
+   where it is drawn, and the tilt and turn are kept in the layout with everything else. Not worn yet.
 
 Windows come back where you left them next time (matched by program and title), from
 `%APPDATA%\WindowViewVR\layout.txt`.

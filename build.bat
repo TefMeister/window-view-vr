@@ -31,6 +31,11 @@ cl /nologo /O2 /EHsc /std:c++17 /MT /W4 /I"%HERE%third_party" "%HERE%test\xr_tes
    /Fo"%HERE%build\\" /Fe"%HERE%build\xr_test_app.exe" /link /NOLOGO
 if errorlevel 1 (echo TEST APP BUILD FAILED & exit /b 1)
 
+rem 1.15: the layer's window sums on their own, for test\turn_test.py (checked against the app's hit test)
+cl /nologo /O2 /EHsc /std:c++17 /MT /W4 /I"%HERE%third_party" "%HERE%test\turn_test.cpp" ^
+   /Fo"%HERE%build\\" /Fe"%HERE%build\turn_test.exe" /link /NOLOGO
+if errorlevel 1 (echo TURN TEST BUILD FAILED & exit /b 1)
+
 if exist "%HERE%app\WindowView.cs" (
     "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /optimize+ /unsafe /win32icon:"%HERE%app\window_view.ico" ^
        /out:"%HERE%dist\WindowView.exe" "%HERE%app\*.cs"

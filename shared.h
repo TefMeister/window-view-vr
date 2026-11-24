@@ -134,3 +134,22 @@ struct WindowViewKeys {
 #pragma pack(pop)
 static_assert(sizeof(WindowViewKeysHand) == 76, "the app reads this layout by offset");
 static_assert(sizeof(WindowViewKeys) == WINDOW_VIEW_KEYS_SIZE, "the app reads this layout by offset");
+
+// ---- 1.15 (2026-11-24): each window's own tilt and turn ------------------------------------------------------------------
+// Tefa: "while LG or RG holds a window, the RIGHT stick tilts it (up/down = back/forward) and turns it (left/right)". A block
+// of its own, for the same reason as the keys block: the main block must never change. The app creates it (app/TurnsShared.cs,
+// same offsets); the layer opens it read-only and turns each window about its own middle (layer/face.inl window_pose). No
+// block (an older app) = no turn. Radians; tilt > 0 = the top leans back, turn > 0 = the face turns right (the right edge back).
+#define WINDOW_VIEW_TURNS_MAPPING_NAME L"Local\\FlatToVR_WindowView_turns_v1"
+#define WINDOW_VIEW_TURNS_MAGIC 0x4E525554u   // "TURN"
+#define WINDOW_VIEW_TURNS_VERSION 1u
+#define WINDOW_VIEW_TURNS_SIZE 72
+#pragma pack(push, 4)
+struct WindowViewTurns {
+    uint32_t magic;                  //   0
+    uint32_t version;                //   4
+    float tilt[WINDOW_VIEW_SLOTS];   //   8  app: per slot, radians
+    float turn[WINDOW_VIEW_SLOTS];   //  40  app: per slot, radians
+};                                   //  72 bytes
+#pragma pack(pop)
+static_assert(sizeof(WindowViewTurns) == WINDOW_VIEW_TURNS_SIZE, "the app reads this layout by offset");

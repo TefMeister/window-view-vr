@@ -31,6 +31,7 @@ static class Program {
         for (int i = 0; i + 1 < args.Length; ++i) if (args[i] == "--dump-keys") ViewUi.DumpKeysPath = args[i + 1];   // 1.12, tests only
         // 1.12: the keyboard's checks (SelfTest.cs); run before the one-instance lock, so they work beside a running app
         if (args.Length > 0 && args[0] == "--selftest-keys") Environment.Exit(SelfTest.Run(args.Length > 1 ? args[1] : "all"));
+        if (args.Length > 0 && args[0] == "--dump-frames") Environment.Exit(SelfTest.DumpFrames());   // 1.15: test/turn_test.py
         bool first;
         using (var one = new Mutex(true, "FlatToVR_WindowView_App", out first)) {
             if (!first) { MessageBox.Show("Window View is already open.", "Window View"); return; }
@@ -107,6 +108,7 @@ class Shared : IDisposable {
     }
     // another app (Hand Poser's nudge) is using X / Y / A / B and the grips right now
     public bool ButtonsClaimed { get { ulong c = view.ReadUInt64(BUTTON_CLAIM); return c != 0 && GetTickCount64() - c < 500; } }
+    public float StickX { get { return view.ReadSingle(636); } }    // 1.15: the right stick's left / right (shared.h stick_x)
     public float LStickX { get { return view.ReadSingle(640); } }   // 1.14: the left stick's left / right (shared.h lstick_x)
     public bool ReadLeftRay(out V3 o, out V3 d, out float squeeze, out float stickY) {
         o = new V3(view.ReadSingle(LRAY_O), view.ReadSingle(LRAY_O + 4), view.ReadSingle(LRAY_O + 8));

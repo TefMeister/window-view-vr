@@ -64,6 +64,7 @@ constexpr int kRetryEveryFrames = 60;          // how often to look again for a 
 constexpr float kDefaultDistance = 1.0f;       // metres in front of the eyes when the app says 0
 constexpr XrDuration kImageWaitNs = 100000000; // 100 ms: never hang the game on a swapchain image
 constexpr DWORD kFenceWaitMs = 1000;
+constexpr float kMaxTurn = 1.6f;            // 1.15: radians; a tilt or turn past this (about 92 degrees) is taken as rubbish
 
 struct Quad {   // one slot's picture in one session
     XrSwapchain swapchain = XR_NULL_HANDLE;
@@ -161,6 +162,23 @@ WindowViewKeys* keys_block() {
     if (p == nullptr) { CloseHandle(h); return nullptr; }
     if (p->magic != WINDOW_VIEW_KEYS_MAGIC) { UnmapViewOfFile(p); CloseHandle(h); return nullptr; }
     g_keys = p;   // kept open for the life of the process, like the main block
+    return p;
+}
+
+// 1.15: each window's own tilt and turn (shared.h WindowViewTurns), made by the app; nullptr until it exists (looked for
+// again every so often), so an older app's windows simply face the eyes as before
+WindowViewTurns* g_turns = nullptr;
+int g_turns_retry = 0;
+WindowViewTurns* turns_block() {
+    if (g_turns != nullptr) return g_turns;
+    if (g_turns_retry-- > 0) return nullptr;
+    g_turns_retry = kRetryEveryFrames;
+    HANDLE h = OpenFileMappingW(FILE_MAP_READ, FALSE, WINDOW_VIEW_TURNS_MAPPING_NAME);
+    if (h == nullptr) return nullptr;
+    auto* p = static_cast<WindowViewTurns*>(MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(WindowViewTurns)));
+    if (p == nullptr) { CloseHandle(h); return nullptr; }
+    if (p->magic != WINDOW_VIEW_TURNS_MAGIC) { UnmapViewOfFile(p); CloseHandle(h); return nullptr; }
+    g_turns = p;   // kept open for the life of the process, like the main block
     return p;
 }
 
@@ -356,17 +374,8 @@ bool copy_pixels(Session& s, const WindowViewSlot& sl, const Quad& q, const uint
     return sl.frame == frame && sl.buffer == buf;
 }
 
-// ---- small vector / quaternion helpers for the room mode -------------------------------------------------------------
-XrQuaternionf q_mul(const XrQuaternionf& a, const XrQuaternionf& b) {
-    return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
-}
-XrVector3f q_rot(const XrQuaternionf& q, const XrVector3f& v) {
-    const XrQuaternionf p{v.x, v.y, v.z, 0}, c{-q.x, -q.y, -q.z, q.w};
-    const XrQuaternionf r = q_mul(q_mul(q, p), c);
-    return {r.x, r.y, r.z};
-}
-XrQuaternionf q_axis(float x, float y, float z, float angle) { const float h = angle * 0.5f, sn = std::sin(h); return {x * sn, y * sn, z * sn, std::cos(h)}; }
+// ---- small vector / quaternion helpers and where each window hangs (face.inl, shared with test/turn_test.cpp) ----
+#include "face.inl"
 
 bool ensure_space(XrSession xs, XrReferenceSpaceType type, XrSpace& space) {
     if (space != XR_NULL_HANDLE) return true;
@@ -512,26 +521,20 @@ void build_quads(Session& s, XrSession xs, std::vector<XrCompositionLayerQuad>& 
         l.subImage.swapchain = q.swapchain;
         l.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(q.width), static_cast<int32_t>(q.height)}};
         l.subImage.imageArrayIndex = 0;
-        // on the desk the window's centre is (x, y) at `distance`; pushed back by `depth` along the same line of sight, so it
-        // keeps its place in the view and shrinks with the distance (its size in metres stays the same). 1.9 (Tefa 2026-10-30:
-        // "windows move further and closer when i want to move them from side to side"): the desk is CURVED around the eyes,
-        // x is the distance along the curve, so a window moved sideways stays as far away and turns to face the eyes
         const float depth = sl.depth > 0.05f ? sl.depth : 1.0f;
-        const float yaw = sl.x / distance;   // radians round the curve
-        const XrVector3f p{std::sin(yaw) * distance * depth, sl.y * depth, -std::cos(yaw) * distance * depth};
-        s.slot_face[i] = q_axis(0, 1, 0, -yaw);
+        float tilt = 0, turn = 0;   // 1.15: the window's own tilt and turn (the turns block; none from an older app)
+        if (WindowViewTurns* t = turns_block()) { tilt = t->tilt[i]; turn = t->turn[i]; }
+        if (!std::isfinite(tilt) || std::fabs(tilt) > kMaxTurn) tilt = 0;
+        if (!std::isfinite(turn) || std::fabs(turn) > kMaxTurn) turn = 0;
+        XrVector3f p{};
+        window_pose(sl.x, sl.y, depth, distance, room, tilt, turn, p, s.slot_face[i]);   // face.inl
         if (!room) {
             l.pose.orientation = s.slot_face[i];
             l.pose.position = p;
         } else {
-            // facing the anchor, upright: turn +Z (the quad's front) towards it, first tipped about X, then about Y
-            const float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-            const XrVector3f n{-p.x / len, -p.y / len, -p.z / len};
-            const XrQuaternionf face = q_mul(q_axis(0, 1, 0, std::atan2(n.x, n.z)), q_axis(1, 0, 0, -std::asin(n.y)));
-            s.slot_face[i] = face;
             const XrVector3f off = q_rot(s.anchor_rot, p);
             l.pose.position = {s.anchor_pos.x + off.x, s.anchor_pos.y + off.y, s.anchor_pos.z + off.z};
-            l.pose.orientation = q_mul(s.anchor_rot, face);
+            l.pose.orientation = q_mul(s.anchor_rot, s.slot_face[i]);
         }
         l.size = {static_cast<float>(q.width) * sl.scale, static_cast<float>(q.height) * sl.scale};
         out.push_back(l);

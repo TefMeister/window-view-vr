@@ -17,6 +17,9 @@ class Placement {
     // 1.4: how far back the window sits, as a share of the desk's distance (F9 / F10). On the desk (the plane the cursor moves
     // on) a window pushed back looks smaller: it is drawn at Scale / Depth metres per pixel there, at the same centre.
     public float Depth = 1f;
+    // 1.15: the window's own tilt and turn about its middle, degrees (the right stick while a grip holds it): tilt > 0 = the
+    // top leans back, turn > 0 = the face turns right. 0 / 0 = facing the eyes, as before
+    public float Tilt, Turn;
     public float Seen { get { return Scale / Depth; } }
     public bool Shown = true;
     public int Slot = -1;
@@ -36,6 +39,7 @@ struct Hit {
 
 class Desk {
     public const float DEFAULT_SCALE = 0.0006f, MIN_SCALE = 0.0002f, MAX_SCALE = 0.003f;   // metres per pixel
+    public const float MAX_TURN = 75f;   // 1.15: degrees either way, for the tilt and the turn (past this a window is hard to aim at)
     public const float MIN_DEPTH = 0.4f, MAX_DEPTH = 4f, DEPTH_STEP = 1.15f;   // 1.4: F9 / F10 push a window back / pull it in by this
     public const float CURSOR_SPEED = 0.0006f;   // metres of desk per mouse pixel (1 mouse px = 1 window px at the default size)
     public const float REACH_X = 0.9f, REACH_Y = 0.6f;   // how far the cursor may go, metres
@@ -43,7 +47,8 @@ class Desk {
     public readonly object Lock = new object();
     public readonly List<Placement> Windows = new List<Placement>();   // last = on top
     public float CursorX, CursorY;
-    static readonly string File = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowViewVR", "layout.txt");
+    internal static string File = Path.Combine(   // 1.15: the self-tests point it at a temp file
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowViewVR", "layout.txt");
 
     // 1.5: where windows overlap, the one the layer draws on top wins: the nearer (it paints farthest first), at the same
     // distance the later slot; so the mouse and the controllers always take the window that is seen
@@ -128,6 +133,7 @@ class Desk {
         hit.P.Depth = Math.Max(MIN_DEPTH, Math.Min(MAX_DEPTH, hit.P.Depth * (float)Math.Pow(DEPTH_STEP, steps)));
         return hit.P;
     }
+    public static float ClampTurn(float deg) { return float.IsNaN(deg) ? 0 : Math.Max(-MAX_TURN, Math.Min(MAX_TURN, deg)); }
     public void Raise(Placement p) { if (Windows.Remove(p)) Windows.Add(p); }
     public int FreeSlot() {
         for (int s = 0; s < Shared.SLOTS; ++s) {
@@ -141,7 +147,7 @@ class Desk {
         var lines = new List<string>();
         var ci = CultureInfo.InvariantCulture;
         foreach (var p in Windows)
-            lines.Add(string.Join("|", new[] { p.Exe, p.Title.Replace("|", " "), p.X.ToString(ci), p.Y.ToString(ci), p.Scale.ToString(ci), p.Opacity.ToString(ci), p.Shown ? "1" : "0", p.Path, p.Depth.ToString(ci) }));
+            lines.Add(string.Join("|", new[] { p.Exe, p.Title.Replace("|", " "), p.X.ToString(ci), p.Y.ToString(ci), p.Scale.ToString(ci), p.Opacity.ToString(ci), p.Shown ? "1" : "0", p.Path, p.Depth.ToString(ci), p.Tilt.ToString(ci), p.Turn.ToString(ci) }));
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(File));
             System.IO.File.WriteAllLines(File, lines.ToArray());
@@ -164,6 +170,8 @@ class Desk {
             p.Shown = f[6] == "1";
             if (f.Length > 7) p.Path = f[7];   // v1.3: the exe's path (older layout files have none)
             if (f.Length > 8) float.TryParse(f[8], NumberStyles.Float, ci, out p.Depth);   // 1.4
+            if (f.Length > 10) { float.TryParse(f[9], NumberStyles.Float, ci, out p.Tilt); float.TryParse(f[10], NumberStyles.Float, ci, out p.Turn); }   // 1.15
+            p.Tilt = ClampTurn(p.Tilt); p.Turn = ClampTurn(p.Turn);
             p.Depth = Math.Max(MIN_DEPTH, Math.Min(MAX_DEPTH, p.Depth == 0 ? 1f : p.Depth));
             p.Scale = Math.Max(MIN_SCALE, Math.Min(MAX_SCALE, p.Scale == 0 ? DEFAULT_SCALE : p.Scale));
             p.Opacity = Math.Max(0.1f, Math.Min(1f, p.Opacity == 0 ? 1f : p.Opacity));

@@ -37,14 +37,28 @@ struct WindowFrame {
         float sy = (float)Math.Sin(yaw), cy = (float)Math.Cos(yaw);
         f.Centre = new V3(sy * distance * d, p.Y * d, -cy * distance * d);
         f.W = p.PicW * p.Scale; f.H = p.PicH * p.Scale;
-        if (!room) { f.Right = new V3(cy, 0, sy); f.Up = new V3(0, 1, 0); f.Normal = new V3(-sy, 0, cy); return f; }
-        float len = f.Centre.Length;
-        var n = f.Centre * (-1f / len);
-        double phi = Math.Atan2(n.X, n.Z), theta = -Math.Asin(n.Y);   // turned about Y by phi after tipping about X by theta
-        f.Normal = n;
-        f.Right = new V3((float)Math.Cos(phi), 0, (float)-Math.Sin(phi));
-        f.Up = new V3((float)(Math.Sin(theta) * Math.Sin(phi)), (float)Math.Cos(theta), (float)(Math.Sin(theta) * Math.Cos(phi)));
+        if (!room) { f.Right = new V3(cy, 0, sy); f.Up = new V3(0, 1, 0); f.Normal = new V3(-sy, 0, cy); }
+        else {
+            float len = f.Centre.Length;
+            var n = f.Centre * (-1f / len);
+            double phi = Math.Atan2(n.X, n.Z), theta = -Math.Asin(n.Y);   // turned about Y by phi after tipping about X by theta
+            f.Normal = n;
+            f.Right = new V3((float)Math.Cos(phi), 0, (float)-Math.Sin(phi));
+            f.Up = new V3((float)(Math.Sin(theta) * Math.Sin(phi)), (float)Math.Cos(theta), (float)(Math.Sin(theta) * Math.Cos(phi)));
+        }
+        if (p.Tilt != 0 || p.Turn != 0) f.Turn(p.Tilt, p.Turn);
         return f;
+    }
+    // 1.15: the window's own turn about its middle, the layer's window_pose (face.inl): face * turn about its own upright line
+    // * tilt about its own level line, so in the window's own axes: Right' = cos t R - sin t N, and with b = -tilt
+    // Up' = sin b sin t R + cos b U + sin b cos t N, Normal' = cos b sin t R - sin b U + cos b cos t N
+    public void Turn(float tiltDeg, float turnDeg) {
+        double t = turnDeg * Math.PI / 180, b = -tiltDeg * Math.PI / 180;
+        float ct = (float)Math.Cos(t), st = (float)Math.Sin(t), cb = (float)Math.Cos(b), sb = (float)Math.Sin(b);
+        V3 r = Right, u = Up, n = Normal;
+        Right = r * ct - n * st;
+        Up = r * (sb * st) + u * cb + n * (sb * ct);
+        Normal = r * (cb * st) - u * sb + n * (cb * ct);
     }
     // where the ray meets the window's plane: u / v across and down the picture (0..1 inside), and how far along the ray
     public bool Meet(V3 o, V3 dir, out float u, out float v, out float t) {
@@ -77,8 +91,11 @@ class Pointer : IDisposable {
     // CLICK_SLOP_PX picture pixels from where it was held (a slider drag), or the trigger is let go.
     const float TRIGGER_TOUCH = 0.12f, CLICK_SLOP_PX = 14f;
     const float STICK_DEAD = 0.25f, WHEEL_NOTCHES_PER_S = 8f, DEPTH_PER_S = 1.6f;   // full stick: 8 wheel notches a second / depth x1.6 a second
+    const float TURN_DEG_PER_S = 60f;   // 1.15: the right stick while carrying: tilt / turn this many degrees a second at full stick
     const float SCALE_PER_S = 1.6f;   // 1.14: the left stick's left / right while carrying: size x1.6 a second at full stick
     readonly Shared shared;
+    readonly TurnsShared turns = new TurnsShared();   // 1.15: every window's tilt and turn, for the layer
+    readonly float[] tiltOut = new float[Shared.SLOTS], turnOut = new float[Shared.SLOTS];
     readonly Desk desk;
     readonly InputRouter input;
     readonly Thread thread;
@@ -101,7 +118,7 @@ class Pointer : IDisposable {
         thread = new Thread(Loop) { IsBackground = true, Name = "Window View pointer" };
         thread.Start();
     }
-    public void Dispose() { running = false; thread.Join(500); shared.WriteCursor(false, -1, new V3(), false); }
+    public void Dispose() { running = false; thread.Join(500); shared.WriteCursor(false, -1, new V3(), false); turns.Clear(); turns.Dispose(); }
 
     void Loop() {
         while (running) {
@@ -119,6 +136,14 @@ class Pointer : IDisposable {
         bool ctrl = shared.CtrlMode;
         if (ctrl) Controllers(room, distance, dt); else Release();
         DrawCursor(room, distance, ctrl || input.On);
+        WriteTurns();
+    }
+
+    // 1.15: every window's tilt and turn to the layer, every loop (a slot with no window: none)
+    void WriteTurns() {
+        Array.Clear(tiltOut, 0, tiltOut.Length); Array.Clear(turnOut, 0, turnOut.Length);
+        lock (desk.Lock) foreach (var p in desk.Windows) if (p.Slot >= 0 && p.Slot < Shared.SLOTS) { tiltOut[p.Slot] = p.Tilt; turnOut[p.Slot] = p.Turn; }
+        for (int i = 0; i < Shared.SLOTS; ++i) turns.Write(i, tiltOut[i], turnOut[i]);
     }
 
     // the nearest window under a ray, and (u, v) on it
@@ -175,6 +200,7 @@ class Pointer : IDisposable {
         // Hand Poser's nudge borrows A, Y, X, B and both grips (Tefa: "X is -1, Y is -5 and holding LG makes X and Y repeat");
         // then nothing here is carried, right-clicked or recentred, but the trigger still clicks and the stick still scrolls
         bool claimed = shared.ButtonsClaimed;
+        float rsy = stick, rsx = shared.StickX;   // 1.15: the right stick as it is, for tilting / turning a held window
         // 1.10 (Tefa 2026-11-09): the helpers now use Y / B (undo, redo), X (clear the ticks) and the right stick (the steps), and
         // A is everyone's left click: while one claims them, only A and the trigger click here, the stick does not scroll, the
         // grips still carry
@@ -190,9 +216,10 @@ class Pointer : IDisposable {
             // 1.14 (Tefa 2026-11-24: "when i'm holding a window in VR with either LG or GR only these must work - LS up/down to move
             // it further/closer LS left/right to make it smaller/bigger"): while a grip holds a window, the LEFT stick works the
             // held window(s) and nothing else answers: no clicks, no wheel, no recentre, no typing (and the helpers stand still,
-            // their Nudge.cs reads the grips too). RS (tilt / turn) needs the layer to turn a window: not yet.
+            // their Nudge.cs reads the grips too). 1.15: the RIGHT stick tilts (up / down = top back / forward) and turns
+            // (right / left) the held window(s) about their own middle.
             if (right.Window != null || left.Window != null) {
-                CarryStick(lstick, shared.LStickX, dt, right.Window, left.Window != right.Window ? left.Window : null);
+                CarryStick(lstick, shared.LStickX, rsy, rsx, dt, right.Window, left.Window != right.Window ? left.Window : null);
                 carrying = true;
             } else carrying = false;
             if (right.Window != null) { hover = right.Window; hu = right.U; hv = right.V; }
@@ -275,8 +302,11 @@ class Pointer : IDisposable {
     }
 
     bool carrying;   // 1.14: a grip holds a window this loop
-    // the left stick on the held window(s): up / down = farther / closer, right / left = bigger / smaller
-    void CarryStick(float sy, float sx, float dt, Placement a, Placement b) {
+    // the left stick on the held window(s): up / down = farther / closer, right / left = bigger / smaller; 1.15: the right stick:
+    // up / down = the top leans back / forward, right / left = the face turns right / left. Only the stick's stronger direction
+    // moves, so a tilt does not turn the window a little too (thumbsticks are rarely pushed dead straight)
+    void CarryStick(float sy, float sx, float ry, float rx, float dt, Placement a, Placement b) {
+        TiltTurn(ry, rx, dt, a, b);
         foreach (var w in new[] { a, b }) {
             if (w == null || !w.Live) continue;
             if (Math.Abs(sy) > STICK_DEAD) {
@@ -287,6 +317,16 @@ class Pointer : IDisposable {
                 float amount = (Math.Abs(sx) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(sx);
                 w.Scale = Math.Max(Desk.MIN_SCALE, Math.Min(Desk.MAX_SCALE, w.Scale * (float)Math.Pow(SCALE_PER_S, amount * dt)));
             }
+        }
+    }
+    public static void TiltTurn(float ry, float rx, float dt, Placement a, Placement b) {
+        bool tilt = Math.Abs(ry) >= Math.Abs(rx);
+        float v = tilt ? ry : rx;
+        if (Math.Abs(v) <= STICK_DEAD) return;
+        float amount = (Math.Abs(v) - STICK_DEAD) / (1 - STICK_DEAD) * Math.Sign(v) * TURN_DEG_PER_S * dt;
+        foreach (var w in new[] { a, b }) {
+            if (w == null || !w.Live) continue;
+            if (tilt) w.Tilt = Desk.ClampTurn(w.Tilt + amount); else w.Turn = Desk.ClampTurn(w.Turn + amount);
         }
     }
     // the mouse buttons let go (a window was taken while one was down), the keyboard hands too
